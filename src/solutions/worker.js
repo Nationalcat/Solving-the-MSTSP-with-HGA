@@ -379,7 +379,8 @@ function runEvolution() {
     if (!running) return;
     
     // Run a batch of generations
-    const batchSize = 50; // Run 50 generations per tick
+    // Reduced batch size to allow more frequent communication/migration
+    const batchSize = 5; 
     for(let i=0; i<batchSize; i++) {
         context.evolveNode(context.nodes[0]);
     }

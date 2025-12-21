@@ -299,10 +299,17 @@
             if (this.problems[id]) {
               const data = this.problems[id];
 
-              // Extract Depot (First point) and Cities (Rest)
-              // We assume the first point in the dataset is the Depot for mTSP/VRP
-              this.originalDepot = data[0];
-              this.originalCities = data.slice(1);
+              if (id.startsWith("MSTSP-")) {
+                // Extract Depot (First point) and Cities (Rest)
+                this.originalDepot = data[0];
+                this.originalCities = data.slice(1);
+              } else {
+                // For convenience stores, use specific depot
+                // 25.033276, 121.434686 (Lat, Lon) -> (y, x)
+                this.originalDepot = { x: 121.434686, y: 25.033276 };
+                this.originalCities = data;
+              }
+
               this.cityCount = this.originalCities.length;
 
               // Find bounds (using ALL points including depot)
@@ -311,7 +318,8 @@
               let minY = Infinity,
                 maxY = -Infinity;
 
-              data.forEach((p) => {
+              const allPoints = [this.originalDepot, ...this.originalCities];
+              allPoints.forEach((p) => {
                 if (p.x < minX) minX = p.x;
                 if (p.x > maxX) maxX = p.x;
                 if (p.y < minY) minY = p.y;
@@ -346,14 +354,17 @@
             const offsetY = margin + (availH - contentH) / 2;
 
             // Set Screen Coordinates
+            // Note: For maps (lat/lon), Y usually increases upwards (North), 
+            // but Canvas Y increases downwards. So we need to invert Y.
+            
             this.depot = {
               x: offsetX + (this.originalDepot.x - minX) * scale,
-              y: offsetY + (this.originalDepot.y - minY) * scale,
+              y: offsetY + (maxY - this.originalDepot.y) * scale, // Invert Y
             };
 
             this.cities = this.originalCities.map((p) => ({
               x: offsetX + (p.x - minX) * scale,
-              y: offsetY + (p.y - minY) * scale,
+              y: offsetY + (maxY - p.y) * scale, // Invert Y
             }));
           },
 
@@ -420,6 +431,8 @@
             this.generation = 0;
             this.globalBestDistance = Infinity;
             this.foundOptima = new Set();
+            this.fBeta = 0;
+            this.diversity = 0;
 
             // Initialize Cities & Depot
             this.generateCities(this.problemId);
@@ -489,6 +502,12 @@
                   if (type === 'init_done') {
                     node.bestDistance = bestDistance;
                     node.bestGenome = bestGenome;
+                    // Update global best immediately after init
+                    if (bestDistance < this.globalBestDistance) {
+                        this.globalBestDistance = bestDistance;
+                    }
+                    // Draw immediately to show initial state
+                    if (!this.running) this.draw();
                   } else if (type === 'update') {
                     node.bestGenome = bestGenome;
                     node.bestDistance = bestDistance;
@@ -518,7 +537,7 @@
             });
 
             // this.evaluate(); // Workers do this now
-            this.draw();
+            // this.draw(); // Moved to worker callback
           },
 
           toggle() {
@@ -549,9 +568,33 @@
             // We just update the generation counter and draw.
             this.generation++; // Approximate counter
             
+            // --- Migration Logic (Crucial for Convergence) ---
+            // Every few frames, gather best solutions from all islands and broadcast them
+            // Increased frequency: migrate every 2 frames instead of 10
+            if (this.generation % 2 === 0) {
+                const migrants = [];
+                this.nodes.forEach(n => {
+                    if (n.type === 'leaf' && n.bestGenome) {
+                        migrants.push(n.bestGenome);
+                    }
+                });
+                
+                if (migrants.length > 0) {
+                    // Remove Proxies to avoid cloning errors
+                    const cleanMigrants = JSON.parse(JSON.stringify(migrants));
+                    this.workers.forEach(w => {
+                        w.postMessage({
+                            type: 'migrate_in',
+                            data: { migrants: cleanMigrants }
+                        });
+                    });
+                }
+            }
+
             // Calculate metrics occasionally
             if (this.generation % 10 === 0) {
                this.calculateMetrics();
+               this.handleDuplicates();
             }
 
             if (this.fBeta >= 1) {
@@ -687,6 +730,44 @@
             this.ctx.fillText(text, tx + padding, ty + h / 2);
           },
 
+          handleDuplicates() {
+            const leaves = this.nodes.filter(n => n.type === 'leaf' && n.bestGenome);
+            const seenSignatures = new Map(); // signature -> nodeId
+
+            leaves.forEach(node => {
+                // Use canonical signature to detect identical solutions (path direction/start invariant)
+                const sig = this.getCanonicalSignature(node.bestGenome);
+                
+                if (seenSignatures.has(sig)) {
+                    // Duplicate found! Restart this node to find a different solution
+                    const workerIndex = node.id - 1; // Node IDs are 1-based, workers array is 0-based
+                    const worker = this.workers[workerIndex];
+                    
+                    if (worker) {
+                        // Re-initialize the worker
+                         worker.postMessage({
+                          type: 'init',
+                          data: {
+                            cityCount: this.cityCount,
+                            salesmenCount: this.salesmenCount,
+                            evalCities: JSON.parse(JSON.stringify(this.evalCities)),
+                            evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                            problemId: this.problemId,
+                            popSize: this.popSize,
+                            groundTruth: JSON.parse(JSON.stringify(this.groundTruth || {})),
+                            nodeId: node.id
+                          }
+                        });
+                        // Reset node stats visually
+                        node.bestDistance = Infinity;
+                        node.bestGenome = null;
+                    }
+                } else {
+                    seenSignatures.set(sig, node.id);
+                }
+            });
+          },
+
           draw() {
             if (!this.drawingEnabled) return;
 
@@ -776,8 +857,21 @@
               this.ctx.lineWidth = 2;
               this.ctx.stroke();
 
+              // Determine tooltip text
+              let tooltipText = `City ${hoveredCity.index}`;
+              // If it's a convenience store problem (not MSTSP), show name + address
+              if (!this.problemId.startsWith("MSTSP-")) {
+                 // Find original data point
+                 // hoveredCity.index corresponds to this.cities[index]
+                 // which corresponds to this.originalCities[index]
+                 const originalData = this.originalCities[hoveredCity.index];
+                 if (originalData && originalData.name && originalData.address) {
+                     tooltipText = `${originalData.name} ${originalData.address}`;
+                 }
+              }
+
               this.drawTooltip(
-                `City ${hoveredCity.index}`,
+                tooltipText,
                 hoveredCity.x,
                 hoveredCity.y - 10,
               );
