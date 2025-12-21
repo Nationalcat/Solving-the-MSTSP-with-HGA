@@ -30,7 +30,7 @@
     <header
       class="p-4 bg-gray-800 shadow-lg z-10 flex flex-wrap gap-6 items-center justify-between border-b border-gray-700"
     >
-      <div class="flex items-center gap-3">
+      <div class="flex items-top gap-3">
         <div class="p-2 bg-purple-600 rounded-lg">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -99,7 +99,7 @@
       <div class="flex flex-col items-end min-w-[100px]">
         <div class="text-xs text-gray-400">最佳距離</div>
         <div
-          x-text="globalBestDistance.toFixed(0)"
+          x-text="globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')"
           class="text-white font-mono text-xl font-bold text-shadow"
         >
           0
@@ -220,7 +220,7 @@
             ></div>
             <span
               class="text-xs text-gray-300 font-mono select-none"
-              x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0)}`"
+              x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')}`"
               :class="{'opacity-50': !node.visible}"
             ></span>
           </div>
@@ -841,7 +841,7 @@
               this.ctx.shadowBlur = 0;
 
               this.drawTooltip(
-                `Sol ${hoveredNode.id}: ${hoveredNode.bestDistance.toFixed(0)}`,
+                `Sol ${hoveredNode.id}: ${hoveredNode.bestDistance.toFixed(0)}${this.problemId.startsWith('MSTSP-') ? '' : ' km'}`,
                 this.mouseX,
                 this.mouseY,
               );
