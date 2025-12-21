@@ -8,7 +8,7 @@
       src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <title>mTSP Visualization</title>
+    <title>MSTSP Visualization</title>
     <style>
       canvas {
         touch-action: none;
@@ -361,6 +361,7 @@
           // Tree Topology: 1 Root -> 3 Leaves (Sub-populations)
           // Node structure: { id, population, bestGenome, bestDistance, color }
           nodes: [],
+          workers: [], // Web Workers
 
           // Parameters
           popSize: 100,
@@ -472,13 +473,51 @@
             }
 
             // Initialize Populations for all nodes
+            // Terminate old workers
+            if (this.workers) {
+                this.workers.forEach(w => w.terminate());
+            }
+            this.workers = [];
+
+            // Initialize Workers for Leaf Nodes
             this.nodes.forEach((node) => {
-              for (let i = 0; i < this.popSize; i++) {
-                node.population.push(this.createValidGenome());
+              if (node.type === 'leaf') {
+                const worker = new Worker('src/solutions/worker.js');
+                
+                worker.onmessage = (e) => {
+                  const { type, bestGenome, bestDistance, generation } = e.data;
+                  if (type === 'init_done') {
+                    node.bestDistance = bestDistance;
+                    node.bestGenome = bestGenome;
+                  } else if (type === 'update') {
+                    node.bestGenome = bestGenome;
+                    node.bestDistance = bestDistance;
+                    // Update global best
+                    if (bestDistance < this.globalBestDistance) {
+                      this.globalBestDistance = bestDistance;
+                    }
+                  }
+                };
+
+                worker.postMessage({
+                  type: 'init',
+                  data: {
+                    cityCount: this.cityCount,
+                    salesmenCount: this.salesmenCount,
+                    evalCities: JSON.parse(JSON.stringify(this.evalCities)),
+                    evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                    problemId: this.problemId,
+                    popSize: this.popSize,
+                    groundTruth: JSON.parse(JSON.stringify(this.groundTruth || {})),
+                    nodeId: node.id
+                  }
+                });
+
+                this.workers.push(worker);
               }
             });
 
-            this.evaluate();
+            // this.evaluate(); // Workers do this now
             this.draw();
           },
 
@@ -490,11 +529,13 @@
           start() {
             if (this.running) return;
             this.running = true;
+            this.workers.forEach(w => w.postMessage({ type: 'start' }));
             this.loop();
           },
 
           stop() {
             this.running = false;
+            this.workers.forEach(w => w.postMessage({ type: 'stop' }));
             if (this.animationId) {
               cancelAnimationFrame(this.animationId);
               this.animationId = null;
@@ -504,19 +545,25 @@
           loop() {
             if (!this.running) return;
 
-            for (let i = 0; i < 5; i++) {
-              this.evolve();
-              this.generation++;
-              if (this.fBeta >= 1) {
+            // Workers are running in background.
+            // We just update the generation counter and draw.
+            this.generation++; // Approximate counter
+            
+            // Calculate metrics occasionally
+            if (this.generation % 10 === 0) {
+               this.calculateMetrics();
+            }
+
+            if (this.fBeta >= 1) {
                 this.stop();
                 this.draw();
                 return;
-              }
             }
 
             if (this.drawingEnabled) {
               this.draw();
             }
+            
             this.animationId = requestAnimationFrame(() => this.loop());
           },
 
