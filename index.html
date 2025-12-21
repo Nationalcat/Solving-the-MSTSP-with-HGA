@@ -15,6 +15,11 @@
       }
     </style>
     <script src="src/tests/mstsp.js"></script>
+    <script src="src/tests/7-11超商.js"></script>
+    <script src="src/tests/萊爾富.js"></script>
+    <script src="src/tests/全家.js"></script>
+    <script src="src/tests/OK超商.js"></script>
+    <script src="src/solutions/hga.js"></script>
   </head>
   <body
     class="bg-gray-900 text-white h-screen flex flex-col overflow-hidden"
@@ -46,93 +51,32 @@
           <h1 class="text-xl font-bold text-gray-100 tracking-wide">
             Multi-Solution TSP
           </h1>
-          <div class="text-xs text-gray-400">多模態/多解路徑規劃</div>
+          <div class="text-xs text-gray-400">多解路徑規劃</div>
         </div>
       </div>
 
       <div class="flex flex-wrap gap-6 items-center">
-        <!-- Mode Control -->
+        <!-- Problem ID Control -->
         <div class="flex flex-col gap-1">
-          <label class="text-xs text-gray-400 font-medium">模式</label>
-          <select
-            x-model="mode"
-            @change="reset()"
-            class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-blue-500 h-[26px]"
-          >
-            <option value="random">隨機生成</option>
-            <option value="fixed">固定問題</option>
-          </select>
-        </div>
-
-        <!-- Problem ID Control (Visible only in Fixed Mode) -->
-        <div class="flex flex-col gap-1" x-show="mode === 'fixed'">
           <label class="text-xs text-gray-400 font-medium">問題 ID</label>
           <select
-            x-model.number="problemId"
+            x-model="problemId"
             @change="reset()"
-            class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-blue-500 h-[26px] w-24"
+            class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-blue-500 h-[26px] w-32"
           >
-            <template x-for="i in 25">
-              <option :value="`MSTSP-${i}`" x-text="`MSTSP-${i}`"></option>
-            </template>
+            <optgroup label="MSTSP Benchmarks">
+              <template x-for="i in 25">
+                <option :value="`MSTSP-${i}`" x-text="`MSTSP-${i}`"></option>
+              </template>
+            </optgroup>
+            <optgroup label="超商">
+              <template
+                x-for="id in Object.keys(problems).filter(k => !k.startsWith('MSTSP-'))"
+              >
+                <option :value="id" x-text="id"></option>
+              </template>
+            </optgroup>
           </select>
-        </div>
-
-        <!-- Cities Control -->
-        <div class="flex flex-col gap-1" x-show="mode === 'random'">
-          <div class="flex justify-between">
-            <label class="text-xs text-gray-400 font-medium">城市 (N)</label>
-            <span
-              class="text-xs text-blue-400 font-bold"
-              x-text="cityCount"
-            ></span>
-          </div>
-          <input
-            type="range"
-            min="5"
-            max="100"
-            x-model.number="cityCount"
-            @input="scheduleReset()"
-            class="w-24 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-          />
-        </div>
-
-        <!-- Salesmen Control -->
-        <div class="flex flex-col gap-1">
-          <div class="flex justify-between">
-            <label class="text-xs text-gray-400 font-medium">旅行商 (m)</label>
-            <span
-              class="text-xs text-green-400 font-bold"
-              x-text="salesmenCount"
-            ></span>
-          </div>
-          <input
-            type="range"
-            min="1"
-            :max="cityCount"
-            x-model.number="salesmenCount"
-            @input="scheduleReset()"
-            class="w-24 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
-          />
-        </div>
-
-        <!-- Solutions Control -->
-        <div class="flex flex-col gap-1">
-          <div class="flex justify-between">
-            <label class="text-xs text-gray-400 font-medium">解數量 (k)</label>
-            <span
-              class="text-xs text-purple-400 font-bold"
-              x-text="solutionCount"
-            ></span>
-          </div>
-          <input
-            type="range"
-            min="1"
-            max="5"
-            x-model.number="solutionCount"
-            @input="scheduleReset()"
-            class="w-24 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-          />
         </div>
 
         <!-- Buttons -->
@@ -165,8 +109,11 @@
           <span x-text="generation" class="font-mono text-gray-300">0</span>
         </div>
 
-        <!-- Metrics Display (Only in Fixed Mode) -->
-        <div x-show="mode === 'fixed'" class="mt-2 flex flex-col items-end">
+        <!-- Metrics Display -->
+        <div
+          class="mt-2 flex flex-col items-end"
+          x-show="groundTruth[problemId]"
+        >
           <div
             class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5"
           >
@@ -211,11 +158,17 @@
       <div
         class="absolute bottom-6 left-6 bg-gray-800/90 p-4 rounded-xl backdrop-blur-md border border-gray-700 shadow-xl"
       >
-        <h3
-          class="text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider"
-        >
-          圖例
-        </h3>
+        <div class="flex justify-between items-center mb-3 gap-4">
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">
+            圖例
+          </h3>
+          <button
+            @click="drawingEnabled = !drawingEnabled; if(drawingEnabled && !running) draw()"
+            class="text-[10px] px-2 py-0.5 rounded border transition-colors font-mono"
+            :class="drawingEnabled ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-gray-700 text-gray-400 border-gray-600'"
+            x-text="drawingEnabled ? '繪圖 ON' : '繪圖 OFF'"
+          ></button>
+        </div>
         <div class="flex items-center gap-3 mb-2">
           <div
             class="w-3 h-3 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.5)]"
@@ -236,18 +189,18 @@
         >
           解決方案 (Solutions)
         </h3>
-        <template x-for="(sol, index) in bestSolutions" :key="index">
+        <template x-for="node in nodes" :key="node.id">
           <div
             class="flex items-center gap-3 mb-1 cursor-pointer hover:bg-gray-700/50 p-1 rounded"
-            x-show="index < solutionCount"
-            @click="sol.visible = !sol.visible; if(!running) draw()"
+            x-show="node.type === 'leaf'"
+            @click="node.visible = !node.visible; if(!running) draw()"
           >
             <div
               class="w-3 h-3 rounded border flex items-center justify-center transition-colors"
-              :class="sol.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
+              :class="node.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
             >
               <svg
-                x-show="sol.visible"
+                x-show="node.visible"
                 class="w-2 h-2 text-white"
                 fill="none"
                 stroke="currentColor"
@@ -263,12 +216,12 @@
             </div>
             <div
               class="w-8 h-1 rounded"
-              :style="`background-color: ${sol.color}; opacity: ${sol.visible ? 1 : 0.3}`"
+              :style="`background-color: ${node.color}; opacity: ${node.visible ? 1 : 0.3}`"
             ></div>
             <span
               class="text-xs text-gray-300 font-mono select-none"
-              x-text="`Sol ${index+1}: ${sol.distance === Infinity ? '-' : sol.distance.toFixed(0)}`"
-              :class="{'opacity-50': !sol.visible}"
+              x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0)}`"
+              :class="{'opacity-50': !node.visible}"
             ></span>
           </div>
         </template>
@@ -278,39 +231,46 @@
     <script>
       function mtspApp() {
         return {
+          ...getHGALogic(),
           cityCount: 30,
           salesmenCount: 1,
-          solutionCount: 3, // Number of islands/solutions
-          mode: "fixed", // 'random' or 'fixed'
-          problemId: 1,
+          solutionCount: 0, // Initial number of islands
+          problemId: "MSTSP-1",
+          foundOptima: new Set(),
           groundTruth: {
-            1: { optLength: 680, optCount: 3 },
-            2: { optLength: 1265, optCount: 4 },
-            3: { optLength: 832, optCount: 13 },
-            4: { optLength: 803, optCount: 4 },
-            5: { optLength: 754, optCount: 2 },
-            6: { optLength: 845, optCount: 4 },
-            7: { optLength: 130, optCount: 56 },
-            8: { optLength: 1344, optCount: 110 },
-            9: { optLength: 72, optCount: 4 },
-            10: { optLength: 72, optCount: 4 },
-            11: { optLength: 78, optCount: 14 },
-            12: { optLength: 130, optCount: 196 },
-            13: { optLength: 3055, optCount: 70 },
-            14: { optLength: 3575, optCount: 16 },
-            15: { optLength: 9455, optCount: 72 },
-            16: { optLength: 8761, optCount: 64 },
-            17: { optLength: 9061, optCount: 10 },
-            18: { optLength: 23763, optCount: 20 },
-            19: { optLength: 14408, optCount: 20 },
-            20: { optLength: 10973, optCount: 20 },
-            21: { optLength: 6767, optCount: 4 },
-            22: { optLength: 10442, optCount: 9 },
-            23: { optLength: 24451, optCount: 10 },
-            24: { optLength: 9614, optCount: 36 },
-            25: { optLength: 9521, optCount: 26 },
+            "MSTSP-1": { optLength: 680, optCount: 3 },
+            "MSTSP-2": { optLength: 1265, optCount: 4 },
+            "MSTSP-3": { optLength: 832, optCount: 13 },
+            "MSTSP-4": { optLength: 803, optCount: 4 },
+            "MSTSP-5": { optLength: 754, optCount: 2 },
+            "MSTSP-6": { optLength: 845, optCount: 4 },
+            "MSTSP-7": { optLength: 130, optCount: 56 },
+            "MSTSP-8": { optLength: 1344, optCount: 110 },
+            "MSTSP-9": { optLength: 72, optCount: 4 },
+            "MSTSP-10": { optLength: 72, optCount: 4 },
+            "MSTSP-11": { optLength: 78, optCount: 14 },
+            "MSTSP-12": { optLength: 130, optCount: 196 },
+            "MSTSP-13": { optLength: 3055, optCount: 70 },
+            "MSTSP-14": { optLength: 3575, optCount: 16 },
+            "MSTSP-15": { optLength: 9455, optCount: 72 },
+            "MSTSP-16": { optLength: 8761, optCount: 64 },
+            "MSTSP-17": { optLength: 9061, optCount: 10 },
+            "MSTSP-18": { optLength: 23763, optCount: 20 },
+            "MSTSP-19": { optLength: 14408, optCount: 20 },
+            "MSTSP-20": { optLength: 10973, optCount: 20 },
+            "MSTSP-21": { optLength: 6767, optCount: 4 },
+            "MSTSP-22": { optLength: 10442, optCount: 9 },
+            "MSTSP-23": { optLength: 24451, optCount: 10 },
+            "MSTSP-24": { optLength: 9614, optCount: 36 },
+            "MSTSP-25": { optLength: 9521, optCount: 26 },
           },
-          problems: {},
+          problems: {
+            ...mstspProblems,
+            ...unimart,
+            ...familymart,
+            ...okmart,
+            ...hilife,
+          },
           running: false,
           generation: 0,
           globalBestDistance: 0,
@@ -333,16 +293,9 @@
           // Metrics
           fBeta: 0,
           diversity: 0,
+          drawingEnabled: true,
 
-          // LCG Seed
-          _seed: 1,
-
-          seededRandom() {
-            const x = Math.sin(this._seed++) * 10000;
-            return x - Math.floor(x);
-          },
-
-          generateFixedCities(id) {
+          generateCities(id) {
             if (this.problems[id]) {
               const data = this.problems[id];
 
@@ -365,58 +318,43 @@
                 if (p.y > maxY) maxY = p.y;
               });
 
-              const margin = 50;
-              const availW = this.width - 2 * margin;
-              const availH = this.height - 2 * margin;
-
-              const rangeX = maxX - minX;
-              const rangeY = maxY - minY;
-
-              // Scale to fit while maintaining aspect ratio
-              const scaleX = rangeX === 0 ? 1 : availW / rangeX;
-              const scaleY = rangeY === 0 ? 1 : availH / rangeY;
-              const scale = Math.min(scaleX, scaleY);
-
-              // Center the content
-              const contentW = rangeX * scale;
-              const contentH = rangeY * scale;
-              const offsetX = margin + (availW - contentW) / 2;
-              const offsetY = margin + (availH - contentH) / 2;
-
-              // Set Screen Coordinates
-              this.depot = {
-                x: offsetX + (this.originalDepot.x - minX) * scale,
-                y: offsetY + (this.originalDepot.y - minY) * scale,
-              };
-
-              this.cities = this.originalCities.map((p) => ({
-                x: offsetX + (p.x - minX) * scale,
-                y: offsetY + (p.y - minY) * scale,
-              }));
-
-              return;
+              this.bounds = { minX, maxX, minY, maxY };
+              this.updateScreenCoordinates();
             }
+          },
 
-            this._seed = id * 12345;
-
-            // Simulate different problem sizes
-            // MSTSP often uses grid-like or symmetric structures
-            // Here we generate deterministic random cities
-            let n = 20;
-            if (id <= 5)
-              n = 10 + id * 2; // 12, 14, 16, 18, 20
-            else if (id <= 15) n = 30;
-            else n = 50;
-
-            this.cityCount = n;
+          updateScreenCoordinates() {
+            if (!this.bounds || !this.originalDepot) return;
+            const { minX, maxX, minY, maxY } = this.bounds;
 
             const margin = 50;
-            for (let i = 0; i < n; i++) {
-              this.cities.push({
-                x: margin + this.seededRandom() * (this.width - 2 * margin),
-                y: margin + this.seededRandom() * (this.height - 2 * margin),
-              });
-            }
+            const availW = this.width - 2 * margin;
+            const availH = this.height - 2 * margin;
+
+            const rangeX = maxX - minX;
+            const rangeY = maxY - minY;
+
+            // Scale to fit while maintaining aspect ratio
+            const scaleX = rangeX === 0 ? 1 : availW / rangeX;
+            const scaleY = rangeY === 0 ? 1 : availH / rangeY;
+            const scale = Math.min(scaleX, scaleY);
+
+            // Center the content
+            const contentW = rangeX * scale;
+            const contentH = rangeY * scale;
+            const offsetX = margin + (availW - contentW) / 2;
+            const offsetY = margin + (availH - contentH) / 2;
+
+            // Set Screen Coordinates
+            this.depot = {
+              x: offsetX + (this.originalDepot.x - minX) * scale,
+              y: offsetY + (this.originalDepot.y - minY) * scale,
+            };
+
+            this.cities = this.originalCities.map((p) => ({
+              x: offsetX + (p.x - minX) * scale,
+              y: offsetY + (p.y - minY) * scale,
+            }));
           },
 
           // HGA Structure
@@ -425,7 +363,7 @@
           nodes: [],
 
           // Parameters
-          popSize: 50,
+          popSize: 100,
           migrationInterval: 10,
           clearingRadius: 0.2, // Similarity threshold for clearing (20%)
 
@@ -455,7 +393,6 @@
           initApp() {
             this.canvas = document.getElementById("mainCanvas");
             this.ctx = this.canvas.getContext("2d");
-            this.problems = mstspProblems
 
             const resize = () => {
               const container = document.getElementById("canvas-container");
@@ -463,6 +400,7 @@
               this.canvas.height = container.clientHeight;
               this.width = this.canvas.width;
               this.height = this.canvas.height;
+              this.updateScreenCoordinates();
               if (!this.running) this.draw();
             };
             window.addEventListener("resize", resize);
@@ -482,33 +420,24 @@
             this.globalBestDistance = Infinity;
             this.foundOptima = new Set();
 
-            // Initialize Depot
-            this.depot = { x: this.width / 2, y: this.height / 2 };
+            // Initialize Cities & Depot
+            this.generateCities(this.problemId);
 
-            // Initialize Cities
-            this.cities = [];
-
-            if (this.mode === "fixed") {
-              this.generateFixedCities(this.problemId);
-              // Use Original Coordinates for Evaluation
-              this.evalCities = this.originalCities;
-              this.evalDepot = this.originalDepot;
+            // Set solution count based on ground truth
+            if (this.groundTruth[this.problemId]) {
+              this.solutionCount = this.groundTruth[this.problemId].optCount;
             } else {
-              const margin = 50;
-              for (let i = 0; i < this.cityCount; i++) {
-                this.cities.push({
-                  x: margin + Math.random() * (this.width - 2 * margin),
-                  y: margin + Math.random() * (this.height - 2 * margin),
-                });
-              }
-              // Use Screen Coordinates for Evaluation
-              this.evalCities = this.cities;
-              this.evalDepot = this.depot;
+              this.solutionCount = 2;
             }
+
+            // Use Original Coordinates for Evaluation
+            this.evalCities = this.originalCities;
+            this.evalDepot = this.originalDepot;
+            this.salesmenCount = 1;
 
             // Initialize HGA Tree Structure
             this.nodes = [];
-            this.bestSolutions = []; // Clear bestSolutions
+            // this.bestSolutions = []; // Removed, using nodes directly
 
             // Ensure salesmenCount <= cityCount
             if (this.salesmenCount > this.cityCount) {
@@ -537,14 +466,6 @@
                 population: [],
                 bestGenome: null,
                 bestDistance: Infinity,
-                color: color,
-                visible: true,
-              });
-
-              // Create corresponding bestSolution entry for UI
-              this.bestSolutions.push({
-                genome: null,
-                distance: Infinity,
                 color: color,
                 visible: true,
               });
@@ -586,401 +507,17 @@
             for (let i = 0; i < 5; i++) {
               this.evolve();
               this.generation++;
+              if (this.fBeta >= 1) {
+                this.stop();
+                this.draw();
+                return;
+              }
             }
 
-            this.draw();
+            if (this.drawingEnabled) {
+              this.draw();
+            }
             this.animationId = requestAnimationFrame(() => this.loop());
-          },
-
-          // --- GA Logic ---
-
-          createValidGenome() {
-            let cities = Array.from({ length: this.cityCount }, (_, i) => i);
-            this.shuffle(cities);
-
-            if (this.salesmenCount === 1) return cities;
-
-            // mTSP Logic for > 1 salesman
-            if (this.salesmenCount > this.cityCount) {
-              return this.shuffle(
-                Array.from(
-                  { length: this.cityCount + this.salesmenCount - 1 },
-                  (_, i) => i,
-                ),
-              );
-            }
-
-            let possibleSplits = Array.from(
-              { length: this.cityCount - 1 },
-              (_, i) => i + 1,
-            );
-            this.shuffle(possibleSplits);
-            let splits = possibleSplits
-              .slice(0, this.salesmenCount - 1)
-              .sort((a, b) => a - b);
-
-            let genome = [];
-            let currentCityIdx = 0;
-            let separatorIdx = this.cityCount;
-
-            for (let split of splits) {
-              while (currentCityIdx < split)
-                genome.push(cities[currentCityIdx++]);
-              genome.push(separatorIdx++);
-            }
-            while (currentCityIdx < this.cityCount)
-              genome.push(cities[currentCityIdx++]);
-
-            return genome;
-          },
-
-          shuffle(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [array[i], array[j]] = [array[j], array[i]];
-            }
-            return array;
-          },
-
-          evaluate() {
-            let globalBest = Infinity;
-
-            // Evaluate each node independently
-            this.nodes.forEach((node) => {
-              let nodeBestDist = Infinity;
-              let nodeBestGenome = null;
-
-              node.population.forEach((genome) => {
-                const dist = this.calculateDistance(genome);
-                genome.fitness = 1 / (dist + 1);
-                genome.distance = dist;
-
-                if (dist < nodeBestDist) {
-                  nodeBestDist = dist;
-                  nodeBestGenome = [...genome];
-                }
-              });
-
-              // Update node best
-              if (nodeBestGenome) {
-                node.bestDistance = nodeBestDist;
-                node.bestGenome = nodeBestGenome;
-              }
-
-              // Track global best (from any node)
-              if (node.bestDistance < globalBest) {
-                globalBest = node.bestDistance;
-              }
-            });
-
-            if (globalBest < Infinity) {
-              this.globalBestDistance = globalBest;
-            }
-          },
-
-          // Calculate similarity between two genomes based on shared edges
-          calculateSimilarity(g1, g2) {
-            if (!g1 || !g2 || g1.length !== g2.length) return 0;
-
-            const getEdges = (genome) => {
-              const edges = new Set();
-              let currentCity = -1; // -1 is Depot
-
-              for (let i = 0; i < genome.length; i++) {
-                let nextCity = genome[i];
-                if (nextCity >= this.cityCount) nextCity = -1;
-
-                const u = currentCity;
-                const v = nextCity;
-                edges.add(u < v ? `${u}_${v}` : `${v}_${u}`);
-
-                currentCity = nextCity;
-              }
-              // Return to depot
-              const u = currentCity;
-              const v = -1;
-              edges.add(u < v ? `${u}_${v}` : `${v}_${u}`);
-              return edges;
-            };
-
-            const edges1 = getEdges(g1);
-            const edges2 = getEdges(g2);
-
-            let shared = 0;
-            edges2.forEach((e) => {
-              if (edges1.has(e)) shared++;
-            });
-
-            // Jaccard Similarity or just Overlap?
-            // Usually for TSP edges: shared / total_edges_in_one_solution
-            // Since both have same number of edges (N + m), we can divide by size.
-            return shared / edges1.size;
-          },
-
-          getCanonicalSignature(genome) {
-            const edges = [];
-            let currentCity = -1; // -1 represents Depot
-
-            for (let i = 0; i < genome.length; i++) {
-              let nextCity = genome[i];
-              if (nextCity >= this.cityCount) nextCity = -1;
-
-              const u = currentCity;
-              const v = nextCity;
-              edges.push(u < v ? `${u}_${v}` : `${v}_${u}`);
-
-              currentCity = nextCity;
-            }
-            // Return to depot
-            const u = currentCity;
-            const v = -1;
-            edges.push(u < v ? `${u}_${v}` : `${v}_${u}`);
-
-            edges.sort();
-            return edges.join("|");
-          },
-
-          calculateMetrics() {
-            if (!this.groundTruth || !this.groundTruth[this.problemId]) return;
-
-            const gt = this.groundTruth[this.problemId];
-            // Increased tolerance to handle float precision vs integer ground truth
-            const tolerance = 1.0;
-
-            // 1. Update Found Optima
-            this.nodes.forEach((node) => {
-              if (
-                node.bestGenome &&
-                Math.abs(node.bestDistance - gt.optLength) < tolerance
-              ) {
-                const sig = this.getCanonicalSignature(node.bestGenome);
-                this.foundOptima.add(sig);
-              }
-            });
-
-            // 2. Calculate F-Beta
-            const R = this.foundOptima.size / gt.optCount;
-            const P = 1.0;
-            const betaSq = 0.3;
-
-            if (P + R === 0) {
-              this.fBeta = 0;
-            } else {
-              this.fBeta = ((1 + betaSq) * P * R) / (betaSq * P + R);
-            }
-
-            // 3. Calculate Diversity (1 - Average Similarity of best solutions)
-            let totalSim = 0;
-            let pairCount = 0;
-            const solutions = this.nodes
-              .map((n) => n.bestGenome)
-              .filter((g) => g);
-
-            if (solutions.length < 2) {
-              this.diversity = 0;
-            } else {
-              for (let i = 0; i < solutions.length; i++) {
-                for (let j = i + 1; j < solutions.length; j++) {
-                  totalSim += this.calculateSimilarity(
-                    solutions[i],
-                    solutions[j],
-                  );
-                  pairCount++;
-                }
-              }
-              const avgSim = totalSim / pairCount;
-              this.diversity = 1 - avgSim;
-            }
-          },
-
-          calculateDistance(genome) {
-            let totalDist = 0;
-            // Use evaluation coordinates (Original or Screen)
-            const useCities = this.evalCities || this.cities;
-            const useDepot = this.evalDepot || this.depot;
-
-            let currentPos = useDepot;
-            let citiesInRoute = 0;
-            let penalty = 0;
-            const PENALTY_AMOUNT = 100000;
-
-            for (let i = 0; i < genome.length; i++) {
-              const index = genome[i];
-              let nextPos;
-
-              if (index < this.cityCount) {
-                nextPos = useCities[index];
-                citiesInRoute++;
-              } else {
-                if (citiesInRoute === 0) penalty += PENALTY_AMOUNT;
-                nextPos = useDepot;
-                citiesInRoute = 0;
-              }
-
-              totalDist += Math.hypot(
-                currentPos.x - nextPos.x,
-                currentPos.y - nextPos.y,
-              );
-              currentPos = nextPos;
-            }
-
-            if (citiesInRoute === 0 && this.salesmenCount > 1)
-              penalty += PENALTY_AMOUNT;
-
-            totalDist += Math.hypot(
-              currentPos.x - useDepot.x,
-              currentPos.y - useDepot.y,
-            );
-
-            return totalDist + penalty;
-          },
-
-          evolve() {
-            // 1. Parallel Evolution for each Node
-            this.nodes.forEach((node) => {
-              this.evolveNode(node);
-            });
-
-            // 2. Hierarchical Migration (Bottom-Up)
-            if (
-              this.generation > 0 &&
-              this.generation % this.migrationInterval === 0
-            ) {
-              this.migrate();
-            }
-
-            this.evaluate();
-            this.calculateMetrics();
-          },
-
-          evolveNode(node) {
-            const newPop = [];
-
-            // Elitism
-            node.population.sort((a, b) => b.fitness - a.fitness);
-            const eliteCount = Math.floor(this.popSize * 0.05);
-            for (let i = 0; i < eliteCount; i++)
-              newPop.push([...node.population[i]]);
-
-            // Standard GA Loop
-            while (newPop.length < this.popSize) {
-              const p1 = this.tournamentSelect(node.population);
-              const p2 = this.tournamentSelect(node.population);
-              let child = this.crossover(p1, p2);
-              if (Math.random() < 0.1) this.mutate(child);
-              newPop.push(child);
-            }
-
-            // Apply Clearing (Niching) within the node?
-            // Or is Clearing applied globally?
-            // The paper usually applies Clearing to maintain diversity *within* a node
-            // OR to ensure nodes are distinct.
-            // Here we apply a simple clearing: if individuals are too similar to the best, penalize them?
-            // Actually, standard GA within node is fine. The distinctness comes from independent evolution + migration logic.
-
-            node.population = newPop;
-          },
-
-          migrate() {
-            // Bottom-Up Migration: Leaves -> Root
-            // 1. Identify best from each Leaf
-            const leafBests = [];
-            this.nodes.forEach((node) => {
-              if (node.type === "leaf" && node.bestGenome) {
-                leafBests.push({
-                  genome: [...node.bestGenome],
-                  fitness: 1 / (node.bestDistance + 1),
-                });
-              }
-            });
-
-            // 2. Send to Root
-            const rootNode = this.nodes[0];
-            // Replace worst individuals in Root with Leaf Bests
-            rootNode.population.sort((a, b) => b.fitness - a.fitness); // Best first
-
-            let replaceIdx = rootNode.population.length - 1;
-            leafBests.forEach((migrant) => {
-              if (replaceIdx >= 0) {
-                rootNode.population[replaceIdx] = migrant.genome;
-                replaceIdx--;
-              }
-            });
-
-            // 3. Top-Down? (Optional, some HGA do this)
-            // Root sends its best back to leaves to guide them?
-            // The paper emphasizes Bottom-Up for collecting solutions.
-            // But to help leaves converge, Root can also seed them.
-            // Let's implement a "Clearing" check here:
-            // If two leaves are too similar, force one to diverge (restart/mutate).
-
-            for (let i = 1; i < this.nodes.length; i++) {
-              for (let j = i + 1; j < this.nodes.length; j++) {
-                const nodeA = this.nodes[i];
-                const nodeB = this.nodes[j];
-
-                if (nodeA.bestGenome && nodeB.bestGenome) {
-                  const sim = this.calculateSimilarity(
-                    nodeA.bestGenome,
-                    nodeB.bestGenome,
-                  );
-                  if (sim > 0.8) {
-                    // Too similar
-                    // Penalize the worse one (reset its population to explore elsewhere)
-                    const worseNode =
-                      nodeA.bestDistance > nodeB.bestDistance ? nodeA : nodeB;
-                    // Heavy mutation on the worse node's population to force divergence
-                    worseNode.population.forEach((g) => this.mutate(g)); // Mutate everyone
-                  }
-                }
-              }
-            }
-          },
-
-          tournamentSelect(pop) {
-            const k = 5;
-            let best = null;
-            for (let i = 0; i < k; i++) {
-              const ind = pop[Math.floor(Math.random() * pop.length)];
-              if (!best || ind.fitness > best.fitness) best = ind;
-            }
-            return best;
-          },
-
-          crossover(p1, p2) {
-            const start = Math.floor(Math.random() * p1.length);
-            const end = Math.floor(Math.random() * (p1.length - start)) + start;
-            const child = new Array(p1.length).fill(-1);
-
-            for (let i = start; i <= end; i++) child[i] = p1[i];
-
-            let p2Idx = 0;
-            for (let i = 0; i < child.length; i++) {
-              if (i >= start && i <= end) continue;
-              while (child.includes(p2[p2Idx])) p2Idx++;
-              child[i] = p2[p2Idx];
-            }
-            return child;
-          },
-
-          mutate(genome) {
-            const i = Math.floor(Math.random() * genome.length);
-            const j = Math.floor(Math.random() * genome.length);
-            [genome[i], genome[j]] = [genome[j], genome[i]];
-
-            if (Math.random() < 0.5) {
-              const a = Math.floor(Math.random() * genome.length);
-              const b = Math.floor(Math.random() * genome.length);
-              const start = Math.min(a, b);
-              const end = Math.max(a, b);
-              let left = start,
-                right = end;
-              while (left < right) {
-                [genome[left], genome[right]] = [genome[right], genome[left]];
-                left++;
-                right--;
-              }
-            }
           },
 
           // --- Drawing ---
@@ -1104,20 +641,17 @@
           },
 
           draw() {
+            if (!this.drawingEnabled) return;
+
             this.ctx.fillStyle = "#111827";
             this.ctx.fillRect(0, 0, this.width, this.height);
 
             // Draw Solutions (Leaves)
-            for (let k = this.nodes.length - 1; k >= 1; k--) {
+            // Iterate through nodes directly
+            for (let k = this.nodes.length - 1; k >= 0; k--) {
               const node = this.nodes[k];
-              const solIdx = k - 1;
-              if (this.bestSolutions[solIdx]) {
-                this.bestSolutions[solIdx].distance = node.bestDistance;
-                this.bestSolutions[solIdx].genome = node.bestGenome;
-
-                if (node.bestGenome && this.bestSolutions[solIdx].visible) {
-                  this.drawPath(node.bestGenome, node.color, solIdx === 0);
-                }
+              if (node.type === "leaf" && node.bestGenome && node.visible) {
+                this.drawPath(node.bestGenome, node.color, false);
               }
             }
 
@@ -1145,7 +679,7 @@
 
             // --- Interaction ---
             let hoveredCity = null;
-            let hoveredSolIndex = -1;
+            let hoveredNode = null;
 
             // Check cities
             for (let i = 0; i < this.cities.length; i++) {
@@ -1159,12 +693,11 @@
             // Check paths (if no city hovered)
             if (!hoveredCity) {
               // Check in reverse order (top to bottom visually)
-              for (let k = this.nodes.length - 1; k >= 1; k--) {
-                const solIdx = k - 1;
-                const sol = this.bestSolutions[solIdx];
-                if (sol && sol.visible && sol.genome) {
-                  if (this.isMouseOnPath(sol.genome)) {
-                    hoveredSolIndex = solIdx;
+              for (let k = this.nodes.length - 1; k >= 0; k--) {
+                const node = this.nodes[k];
+                if (node.type === "leaf" && node.visible && node.bestGenome) {
+                  if (this.isMouseOnPath(node.bestGenome)) {
+                    hoveredNode = node;
                     break;
                   }
                 }
@@ -1172,16 +705,15 @@
             }
 
             // Draw Highlights & Tooltips
-            if (hoveredSolIndex !== -1) {
-              const sol = this.bestSolutions[hoveredSolIndex];
+            if (hoveredNode) {
               // Highlight path
               this.ctx.shadowBlur = 15;
-              this.ctx.shadowColor = sol.color;
-              this.drawPath(sol.genome, sol.color, true); // Redraw as primary
+              this.ctx.shadowColor = hoveredNode.color;
+              this.drawPath(hoveredNode.bestGenome, hoveredNode.color, true); // Redraw as primary
               this.ctx.shadowBlur = 0;
 
               this.drawTooltip(
-                `Sol ${hoveredSolIndex + 1}: ${sol.distance.toFixed(0)}`,
+                `Sol ${hoveredNode.id}: ${hoveredNode.bestDistance.toFixed(0)}`,
                 this.mouseX,
                 this.mouseY,
               );
