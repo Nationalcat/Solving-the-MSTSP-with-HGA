@@ -359,6 +359,11 @@ self.onmessage = function(e) {
             context.nodes[0].population.push(context.createValidGenome());
         }
         
+        // Inject initial best genome if provided
+        if (data.initialBestGenome) {
+            context.nodes[0].population[0] = data.initialBestGenome;
+        }
+
         context.evaluate();
         postMessage({ 
             type: 'init_done', 

@@ -55,7 +55,7 @@
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-6 items-center">
+      <div class="flex flex-wrap gap-6 items-end">
         <!-- Problem ID Control -->
         <div class="flex flex-col gap-1">
           <label class="text-xs text-gray-400 font-medium">問題 ID</label>
@@ -80,7 +80,26 @@
         </div>
 
         <!-- Buttons -->
-        <div class="flex gap-3 items-end h-full pb-1">
+        <div class="flex gap-3">
+          <button
+            @click="exportState()"
+            class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm font-medium transition border border-gray-600 hover:border-gray-500"
+          >
+            匯出
+          </button>
+          <button
+            @click="$refs.fileInput.click()"
+            class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm font-medium transition border border-gray-600 hover:border-gray-500"
+          >
+            匯入
+          </button>
+          <input
+            x-ref="fileInput"
+            type="file"
+            style="display: none"
+            @change="importState($event)"
+            accept=".json"
+          />
           <button
             @click="reset()"
             class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm font-medium transition border border-gray-600 hover:border-gray-500"
@@ -95,53 +114,46 @@
           ></button>
         </div>
       </div>
+    </header>
+    <aside class="absolute sm:top-40 md:top-24 top-54 right-3 z-10 flex flex-col items-end min-w-[100px]">
+      <div class="text-xs text-gray-400">最佳距離</div>
+      <div
+        x-text="globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')"
+        class="text-white font-mono text-xl font-bold text-shadow"
+      >
+        0
+      </div>
+      <div class="text-xs text-gray-500 mt-1">
+        迭代:
+        <span x-text="generation" class="font-mono text-gray-300">0</span>
+      </div>
 
-      <div class="flex flex-col items-end min-w-[100px]">
-        <div class="text-xs text-gray-400">最佳距離</div>
-        <div
-          x-text="globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')"
-          class="text-white font-mono text-xl font-bold text-shadow"
-        >
-          0
+      <!-- Metrics Display -->
+      <div class="mt-2 flex flex-col items-end" x-show="groundTruth[problemId]">
+        <div class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">
+          F-Beta
         </div>
-        <div class="text-xs text-gray-500 mt-1">
-          迭代:
-          <span x-text="generation" class="font-mono text-gray-300">0</span>
+        <div
+          class="text-sm font-mono font-bold"
+          :class="fBeta > 0.8 ? 'text-green-400' : 'text-yellow-400'"
+          x-text="fBeta.toFixed(3)"
+        >
+          0.000
         </div>
 
-        <!-- Metrics Display -->
         <div
-          class="mt-2 flex flex-col items-end"
-          x-show="groundTruth[problemId]"
+          class="text-[10px] text-gray-400 uppercase tracking-wider mt-1 mb-0.5"
         >
-          <div
-            class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5"
-          >
-            F-Beta
-          </div>
-          <div
-            class="text-sm font-mono font-bold"
-            :class="fBeta > 0.8 ? 'text-green-400' : 'text-yellow-400'"
-            x-text="fBeta.toFixed(3)"
-          >
-            0.000
-          </div>
-
-          <div
-            class="text-[10px] text-gray-400 uppercase tracking-wider mt-1 mb-0.5"
-          >
-            Diversity
-          </div>
-          <div
-            class="text-sm font-mono font-bold text-blue-400"
-            x-text="diversity.toFixed(3)"
-          >
-            0.000
-          </div>
+          Diversity
+        </div>
+        <div
+          class="text-sm font-mono font-bold text-blue-400"
+          x-text="diversity.toFixed(3)"
+        >
+          0.000
         </div>
       </div>
-    </header>
-
+    </aside>
     <!-- Main Canvas Area -->
     <main
       class="flex-1 relative bg-gray-900 cursor-crosshair overflow-hidden"
@@ -160,93 +172,106 @@
       >
         <!-- Header -->
         <div class="p-4 pb-2 shrink-0">
-            <div class="flex justify-between items-center mb-3 gap-4">
-              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                圖例
-              </h3>
-              <button
-                @click="drawingEnabled = !drawingEnabled; if(drawingEnabled && !running) draw()"
-                class="text-[10px] px-2 py-0.5 rounded border transition-colors font-mono"
-                :class="drawingEnabled ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-gray-700 text-gray-400 border-gray-600'"
-                x-text="drawingEnabled ? '繪圖 ON' : '繪圖 OFF'"
-              ></button>
-            </div>
-            <div class="flex items-center gap-3 mb-2">
-              <div
-                class="w-3 h-3 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.5)]"
-              ></div>
-              <span class="text-sm text-gray-200">城市 (City)</span>
-            </div>
-            <div class="flex items-center gap-3 mb-4">
-              <div
-                class="w-5 h-5 bg-red-500 rounded flex items-center justify-center text-[10px] font-bold shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-              >
-                D
-              </div>
-              <span class="text-sm text-gray-200">倉庫 (Depot)</span>
-            </div>
-
+          <div class="flex justify-between items-center mb-3 gap-4">
             <h3
-              class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider"
+              class="text-xs font-bold text-gray-400 uppercase tracking-wider"
             >
-              解決方案 (Solutions)
+              圖例
             </h3>
+            <button
+              @click="drawingEnabled = !drawingEnabled; if(drawingEnabled && !running) draw()"
+              class="text-[10px] px-2 py-0.5 rounded border transition-colors font-mono"
+              :class="drawingEnabled ? 'bg-green-500/20 text-green-400 border-green-500/50' : 'bg-gray-700 text-gray-400 border-gray-600'"
+              x-text="drawingEnabled ? '繪圖 ON' : '繪圖 OFF'"
+            ></button>
+          </div>
+          <div class="flex items-center gap-3 mb-2">
+            <div
+              class="w-3 h-3 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.5)]"
+            ></div>
+            <span class="text-sm text-gray-200">城市 (City)</span>
+          </div>
+          <div class="flex items-center gap-3 mb-4">
+            <div
+              class="w-5 h-5 bg-red-500 rounded flex items-center justify-center text-[10px] font-bold shadow-[0_0_8px_rgba(239,68,68,0.5)]"
+            >
+              D
+            </div>
+            <span class="text-sm text-gray-200">倉庫 (Depot)</span>
+          </div>
+
+          <h3
+            class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider"
+          >
+            解決方案 (Solutions)
+          </h3>
         </div>
 
         <!-- Scrollable List -->
         <div class="overflow-y-auto px-4 min-h-0">
-            <template x-for="node in nodes" :key="node.id">
+          <template x-for="node in nodes" :key="node.id">
+            <div
+              class="flex items-center gap-3 mb-1 cursor-pointer hover:bg-gray-700/50 p-1 rounded"
+              x-show="node.type === 'leaf'"
+              @click="node.visible = !node.visible; if(!running) draw()"
+            >
               <div
-                class="flex items-center gap-3 mb-1 cursor-pointer hover:bg-gray-700/50 p-1 rounded"
-                x-show="node.type === 'leaf'"
-                @click="node.visible = !node.visible; if(!running) draw()"
+                class="w-3 h-3 rounded border flex items-center justify-center transition-colors"
+                :class="node.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
               >
-                <div
-                  class="w-3 h-3 rounded border flex items-center justify-center transition-colors"
-                  :class="node.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
+                <svg
+                  x-show="node.visible"
+                  class="w-2 h-2 text-white"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <svg
-                    x-show="node.visible"
-                    class="w-2 h-2 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="4"
-                      d="M5 13l4 4L19 7"
-                    ></path>
-                  </svg>
-                </div>
-                <div
-                  class="w-8 h-1 rounded"
-                  :style="`background-color: ${node.color}; opacity: ${node.visible ? 1 : 0.3}`"
-                ></div>
-                <span
-                  class="text-xs text-gray-300 font-mono select-none"
-                  x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')}`"
-                  :class="{'opacity-50': !node.visible}"
-                ></span>
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="4"
+                    d="M5 13l4 4L19 7"
+                  ></path>
+                </svg>
               </div>
-            </template>
+              <div
+                class="w-8 h-1 rounded"
+                :style="`background-color: ${node.color}; opacity: ${node.visible ? 1 : 0.3}`"
+              ></div>
+              <span
+                class="text-xs text-gray-300 font-mono select-none"
+                x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')}`"
+                :class="{'opacity-50': !node.visible}"
+              ></span>
+            </div>
+          </template>
         </div>
-        
+
         <!-- Sticky Footer -->
-        <div class="p-4 pt-3 border-t border-gray-700 shrink-0 bg-gray-800/50 rounded-b-xl">
-            <div class="flex justify-between text-xs text-gray-400 mb-1">
-                <span>最佳距離:</span>
-                <span class="font-mono text-gray-200 font-bold" x-text="globalBestDistance === Infinity ? '-' : (globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km'))"></span>
-            </div>
-            <div class="flex justify-between text-xs text-gray-400 mb-1">
-                <span>最佳解耗時:</span>
-                <span class="font-mono text-gray-200" x-text="bestTime + ' s'"></span>
-            </div>
-            <div class="flex justify-between text-xs text-gray-400">
-                <span>最佳解迭代:</span>
-                <span class="font-mono text-gray-200" x-text="bestGeneration"></span>
-            </div>
+        <div
+          class="p-4 pt-3 border-t border-gray-700 shrink-0 bg-gray-800/50 rounded-b-xl"
+        >
+          <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span>最佳距離:</span>
+            <span
+              class="font-mono text-gray-200 font-bold"
+              x-text="globalBestDistance === Infinity ? '-' : (globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km'))"
+            ></span>
+          </div>
+          <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span>最佳解耗時:</span>
+            <span
+              class="font-mono text-gray-200"
+              x-text="bestTime + ' s'"
+            ></span>
+          </div>
+          <div class="flex justify-between text-xs text-gray-400">
+            <span>最佳解迭代:</span>
+            <span
+              class="font-mono text-gray-200"
+              x-text="bestGeneration"
+            ></span>
+          </div>
         </div>
       </div>
     </main>
@@ -317,7 +342,7 @@
           fBeta: 0,
           diversity: 0,
           drawingEnabled: true,
-          
+
           // Timing & Stats
           startTime: null,
           bestTime: 0,
@@ -382,9 +407,9 @@
             const offsetY = margin + (availH - contentH) / 2;
 
             // Set Screen Coordinates
-            // Note: For maps (lat/lon), Y usually increases upwards (North), 
+            // Note: For maps (lat/lon), Y usually increases upwards (North),
             // but Canvas Y increases downwards. So we need to invert Y.
-            
+
             this.depot = {
               x: offsetX + (this.originalDepot.x - minX) * scale,
               y: offsetY + (maxY - this.originalDepot.y) * scale, // Invert Y
@@ -449,6 +474,157 @@
             this.reset();
           },
 
+          exportState() {
+            const state = {
+              problemId: this.problemId,
+              salesmenCount: this.salesmenCount,
+              generation: this.generation,
+              globalBestDistance: this.globalBestDistance,
+              nodes: this.nodes.map((n) => ({
+                id: n.id,
+                type: n.type,
+                bestGenome: n.bestGenome,
+                bestDistance: n.bestDistance,
+                color: n.color,
+                visible: n.visible,
+              })),
+              fBeta: this.fBeta,
+              diversity: this.diversity,
+              bestTime: this.bestTime,
+              bestGeneration: this.bestGeneration,
+              timestamp: new Date().toISOString(),
+            };
+
+            const blob = new Blob([JSON.stringify(state, null, 2)], {
+              type: "application/json",
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `mstsp-state-${this.problemId}-${this.generation}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          },
+
+          importState(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              try {
+                const state = JSON.parse(e.target.result);
+                this.loadState(state);
+              } catch (err) {
+                console.error("Failed to load state:", err);
+                alert("匯入失敗：檔案格式錯誤 (" + err.message + ")");
+              }
+              event.target.value = "";
+            };
+            reader.readAsText(file);
+          },
+
+          loadState(state) {
+            this.stop();
+
+            if (!state || !state.nodes || !Array.isArray(state.nodes)) {
+              throw new Error("Invalid state file format: missing nodes");
+            }
+
+            // 1. Restore Problem ID and Environment
+            if (state.problemId) {
+              this.problemId = state.problemId;
+            }
+
+            // Regenerate cities based on the ID (updates originalCities, cityCount, bounds)
+            this.generateCities(this.problemId);
+
+            // CRITICAL: Update evaluation context to match the new problem
+            // This ensures workers get the correct coordinates
+            this.evalCities = this.originalCities;
+            this.evalDepot = this.originalDepot;
+
+            // Restore salesmen count if available, else default to 1
+            this.salesmenCount = state.salesmenCount || 1;
+
+            // 2. Restore Metrics
+            this.generation = state.generation || 0;
+            this.globalBestDistance = state.globalBestDistance || Infinity;
+            this.fBeta = state.fBeta || 0;
+            this.diversity = state.diversity || 0;
+            this.bestTime = state.bestTime || 0;
+            this.bestGeneration = state.bestGeneration || 0;
+
+            // 3. Restore Nodes
+            this.nodes = state.nodes.map((n) => ({
+              ...n,
+              population: [], // Population is not exported, will be re-initialized
+            }));
+
+            // 4. Re-initialize Workers
+            if (this.workers) {
+              this.workers.forEach((w) => w.terminate());
+            }
+            this.workers = [];
+
+            this.nodes.forEach((node) => {
+              if (node.type === "leaf") {
+                const worker = new Worker("src/solutions/worker.js");
+
+                worker.onmessage = (e) => {
+                  const { type, bestGenome, bestDistance } = e.data;
+                  if (type === "init_done") {
+                    // If the worker found a better solution (or just initialized), update
+                    // But we want to keep the imported best if it's better
+                    if (bestDistance < node.bestDistance) {
+                      node.bestDistance = bestDistance;
+                      node.bestGenome = bestGenome;
+                    }
+                    if (!this.running) this.draw();
+                  } else if (type === "update") {
+                    node.bestGenome = bestGenome;
+                    node.bestDistance = bestDistance;
+                    if (bestDistance < this.globalBestDistance) {
+                      this.globalBestDistance = bestDistance;
+                      this.bestGeneration = this.generation;
+                      if (this.startTime) {
+                        this.bestTime = (
+                          (Date.now() - this.startTime) /
+                          1000
+                        ).toFixed(2);
+                      }
+                    }
+                  }
+                };
+
+                worker.postMessage({
+                  type: "init",
+                  data: {
+                    cityCount: this.cityCount,
+                    salesmenCount: this.salesmenCount,
+                    evalCities: JSON.parse(JSON.stringify(this.evalCities)),
+                    evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                    problemId: this.problemId,
+                    popSize: this.popSize,
+                    groundTruth: JSON.parse(
+                      JSON.stringify(this.groundTruth || {}),
+                    ),
+                    nodeId: node.id,
+                    initialBestGenome: node.bestGenome
+                      ? JSON.parse(JSON.stringify(node.bestGenome))
+                      : null,
+                  },
+                });
+
+                this.workers.push(worker);
+              }
+            });
+
+            this.draw();
+          },
+
           scheduleReset() {
             if (this.resetTimeout) clearTimeout(this.resetTimeout);
             this.resetTimeout = setTimeout(() => this.reset(), 100);
@@ -461,7 +637,7 @@
             this.foundOptima = new Set();
             this.fBeta = 0;
             this.diversity = 0;
-            
+
             this.startTime = null;
             this.bestTime = 0;
             this.bestGeneration = 0;
@@ -520,27 +696,27 @@
             // Initialize Populations for all nodes
             // Terminate old workers
             if (this.workers) {
-                this.workers.forEach(w => w.terminate());
+              this.workers.forEach((w) => w.terminate());
             }
             this.workers = [];
 
             // Initialize Workers for Leaf Nodes
             this.nodes.forEach((node) => {
-              if (node.type === 'leaf') {
-                const worker = new Worker('src/solutions/worker.js');
-                
+              if (node.type === "leaf") {
+                const worker = new Worker("src/solutions/worker.js");
+
                 worker.onmessage = (e) => {
                   const { type, bestGenome, bestDistance, generation } = e.data;
-                  if (type === 'init_done') {
+                  if (type === "init_done") {
                     node.bestDistance = bestDistance;
                     node.bestGenome = bestGenome;
                     // Update global best immediately after init
                     if (bestDistance < this.globalBestDistance) {
-                        this.globalBestDistance = bestDistance;
+                      this.globalBestDistance = bestDistance;
                     }
                     // Draw immediately to show initial state
                     if (!this.running) this.draw();
-                  } else if (type === 'update') {
+                  } else if (type === "update") {
                     node.bestGenome = bestGenome;
                     node.bestDistance = bestDistance;
                     // Update global best
@@ -548,14 +724,17 @@
                       this.globalBestDistance = bestDistance;
                       this.bestGeneration = this.generation;
                       if (this.startTime) {
-                          this.bestTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+                        this.bestTime = (
+                          (Date.now() - this.startTime) /
+                          1000
+                        ).toFixed(2);
                       }
                     }
                   }
                 };
 
                 worker.postMessage({
-                  type: 'init',
+                  type: "init",
                   data: {
                     cityCount: this.cityCount,
                     salesmenCount: this.salesmenCount,
@@ -563,9 +742,11 @@
                     evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
                     problemId: this.problemId,
                     popSize: this.popSize,
-                    groundTruth: JSON.parse(JSON.stringify(this.groundTruth || {})),
-                    nodeId: node.id
-                  }
+                    groundTruth: JSON.parse(
+                      JSON.stringify(this.groundTruth || {}),
+                    ),
+                    nodeId: node.id,
+                  },
                 });
 
                 this.workers.push(worker);
@@ -585,13 +766,13 @@
             if (this.running) return;
             if (!this.startTime) this.startTime = Date.now();
             this.running = true;
-            this.workers.forEach(w => w.postMessage({ type: 'start' }));
+            this.workers.forEach((w) => w.postMessage({ type: "start" }));
             this.loop();
           },
 
           stop() {
             this.running = false;
-            this.workers.forEach(w => w.postMessage({ type: 'stop' }));
+            this.workers.forEach((w) => w.postMessage({ type: "stop" }));
             if (this.animationId) {
               cancelAnimationFrame(this.animationId);
               this.animationId = null;
@@ -604,46 +785,46 @@
             // Workers are running in background.
             // We just update the generation counter and draw.
             this.generation++; // Approximate counter
-            
+
             // --- Migration Logic (Crucial for Convergence) ---
             // Every few frames, gather best solutions from all islands and broadcast them
             // Increased frequency: migrate every 2 frames instead of 10
             if (this.generation % 2 === 0) {
-                const migrants = [];
-                this.nodes.forEach(n => {
-                    if (n.type === 'leaf' && n.bestGenome) {
-                        migrants.push(n.bestGenome);
-                    }
-                });
-                
-                if (migrants.length > 0) {
-                    // Remove Proxies to avoid cloning errors
-                    const cleanMigrants = JSON.parse(JSON.stringify(migrants));
-                    this.workers.forEach(w => {
-                        w.postMessage({
-                            type: 'migrate_in',
-                            data: { migrants: cleanMigrants }
-                        });
-                    });
+              const migrants = [];
+              this.nodes.forEach((n) => {
+                if (n.type === "leaf" && n.bestGenome) {
+                  migrants.push(n.bestGenome);
                 }
+              });
+
+              if (migrants.length > 0) {
+                // Remove Proxies to avoid cloning errors
+                const cleanMigrants = JSON.parse(JSON.stringify(migrants));
+                this.workers.forEach((w) => {
+                  w.postMessage({
+                    type: "migrate_in",
+                    data: { migrants: cleanMigrants },
+                  });
+                });
+              }
             }
 
             // Calculate metrics occasionally
             if (this.generation % 10 === 0) {
-               this.calculateMetrics();
-               this.handleDuplicates();
+              this.calculateMetrics();
+              this.handleDuplicates();
             }
 
             if (this.fBeta >= 1) {
-                this.stop();
-                this.draw();
-                return;
+              this.stop();
+              this.draw();
+              return;
             }
 
             if (this.drawingEnabled) {
               this.draw();
             }
-            
+
             this.animationId = requestAnimationFrame(() => this.loop());
           },
 
@@ -768,40 +949,44 @@
           },
 
           handleDuplicates() {
-            const leaves = this.nodes.filter(n => n.type === 'leaf' && n.bestGenome);
+            const leaves = this.nodes.filter(
+              (n) => n.type === "leaf" && n.bestGenome,
+            );
             const seenSignatures = new Map(); // signature -> nodeId
 
-            leaves.forEach(node => {
-                // Use canonical signature to detect identical solutions (path direction/start invariant)
-                const sig = this.getCanonicalSignature(node.bestGenome);
-                
-                if (seenSignatures.has(sig)) {
-                    // Duplicate found! Restart this node to find a different solution
-                    const workerIndex = node.id - 1; // Node IDs are 1-based, workers array is 0-based
-                    const worker = this.workers[workerIndex];
-                    
-                    if (worker) {
-                        // Re-initialize the worker
-                         worker.postMessage({
-                          type: 'init',
-                          data: {
-                            cityCount: this.cityCount,
-                            salesmenCount: this.salesmenCount,
-                            evalCities: JSON.parse(JSON.stringify(this.evalCities)),
-                            evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
-                            problemId: this.problemId,
-                            popSize: this.popSize,
-                            groundTruth: JSON.parse(JSON.stringify(this.groundTruth || {})),
-                            nodeId: node.id
-                          }
-                        });
-                        // Reset node stats visually
-                        node.bestDistance = Infinity;
-                        node.bestGenome = null;
-                    }
-                } else {
-                    seenSignatures.set(sig, node.id);
+            leaves.forEach((node) => {
+              // Use canonical signature to detect identical solutions (path direction/start invariant)
+              const sig = this.getCanonicalSignature(node.bestGenome);
+
+              if (seenSignatures.has(sig)) {
+                // Duplicate found! Restart this node to find a different solution
+                const workerIndex = node.id - 1; // Node IDs are 1-based, workers array is 0-based
+                const worker = this.workers[workerIndex];
+
+                if (worker) {
+                  // Re-initialize the worker
+                  worker.postMessage({
+                    type: "init",
+                    data: {
+                      cityCount: this.cityCount,
+                      salesmenCount: this.salesmenCount,
+                      evalCities: JSON.parse(JSON.stringify(this.evalCities)),
+                      evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                      problemId: this.problemId,
+                      popSize: this.popSize,
+                      groundTruth: JSON.parse(
+                        JSON.stringify(this.groundTruth || {}),
+                      ),
+                      nodeId: node.id,
+                    },
+                  });
+                  // Reset node stats visually
+                  node.bestDistance = Infinity;
+                  node.bestGenome = null;
                 }
+              } else {
+                seenSignatures.set(sig, node.id);
+              }
             });
           },
 
@@ -878,7 +1063,7 @@
               this.ctx.shadowBlur = 0;
 
               this.drawTooltip(
-                `Sol ${hoveredNode.id}: ${hoveredNode.bestDistance.toFixed(0)}${this.problemId.startsWith('MSTSP-') ? '' : ' km'}`,
+                `Sol ${hoveredNode.id}: ${hoveredNode.bestDistance.toFixed(0)}${this.problemId.startsWith("MSTSP-") ? "" : " km"}`,
                 this.mouseX,
                 this.mouseY,
               );
@@ -898,20 +1083,16 @@
               let tooltipText = `City ${hoveredCity.index}`;
               // If it's a convenience store problem (not MSTSP), show name + address
               if (!this.problemId.startsWith("MSTSP-")) {
-                 // Find original data point
-                 // hoveredCity.index corresponds to this.cities[index]
-                 // which corresponds to this.originalCities[index]
-                 const originalData = this.originalCities[hoveredCity.index];
-                 if (originalData && originalData.name && originalData.address) {
-                     tooltipText = `${originalData.name} ${originalData.address}`;
-                 }
+                // Find original data point
+                // hoveredCity.index corresponds to this.cities[index]
+                // which corresponds to this.originalCities[index]
+                const originalData = this.originalCities[hoveredCity.index];
+                if (originalData && originalData.name && originalData.address) {
+                  tooltipText = `${originalData.name} ${originalData.address}`;
+                }
               }
 
-              this.drawTooltip(
-                tooltipText,
-                hoveredCity.x,
-                hoveredCity.y - 10,
-              );
+              this.drawTooltip(tooltipText, hoveredCity.x, hoveredCity.y - 10);
             }
           },
 
