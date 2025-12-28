@@ -161,8 +161,10 @@
     >
       <canvas
         id="mainCanvas"
-        class="block w-full h-full"
+        class="block w-full h-full cursor-grab active:cursor-grabbing"
+        @mousedown="startDrag($event)"
         @mousemove="handleMouseMove($event)"
+        @mouseup="stopDrag()"
         @mouseleave="handleMouseLeave()"
       ></canvas>
 
@@ -274,6 +276,31 @@
           </div>
         </div>
       </div>
+
+      <!-- Zoom Controls -->
+      <div class="absolute bottom-6 right-6 flex flex-row gap-2 items-center">
+        <div class="text-xs font-mono text-gray-300 bg-gray-800/90 rounded px-2 py-1 border border-gray-700 shadow-xl backdrop-blur-md min-w-[3.5rem] text-center select-none">
+            <span x-text="Math.round(zoomLevel * 100) + '%'"></span>
+        </div>
+        <button
+          @click="zoomOut()"
+          class="p-2 bg-gray-800/90 hover:bg-gray-700 rounded-lg backdrop-blur-md border border-gray-700 shadow-xl text-white transition-colors"
+          title="Zoom Out"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+          </svg>
+        </button>
+        <button
+          @click="zoomIn()"
+          class="p-2 bg-gray-800/90 hover:bg-gray-700 rounded-lg backdrop-blur-md border border-gray-700 shadow-xl text-white transition-colors"
+          title="Zoom In"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
+        </button>
+      </div>
     </main>
 
     <script>
@@ -342,11 +369,29 @@
           fBeta: 0,
           diversity: 0,
           drawingEnabled: true,
+          zoomLevel: 1,
+          panX: 0,
+          panY: 0,
+          isDragging: false,
+          dragStartX: 0,
+          dragStartY: 0,
 
           // Timing & Stats
           startTime: null,
           bestTime: 0,
           bestGeneration: 0,
+
+          zoomIn() {
+            this.zoomLevel *= 1.2;
+            this.updateScreenCoordinates();
+            if (!this.running) this.draw();
+          },
+
+          zoomOut() {
+            this.zoomLevel /= 1.2;
+            this.updateScreenCoordinates();
+            if (!this.running) this.draw();
+          },
 
           generateCities(id) {
             if (this.problems[id]) {
@@ -398,13 +443,13 @@
             // Scale to fit while maintaining aspect ratio
             const scaleX = rangeX === 0 ? 1 : availW / rangeX;
             const scaleY = rangeY === 0 ? 1 : availH / rangeY;
-            const scale = Math.min(scaleX, scaleY);
+            const scale = Math.min(scaleX, scaleY) * this.zoomLevel;
 
             // Center the content
             const contentW = rangeX * scale;
             const contentH = rangeY * scale;
-            const offsetX = margin + (availW - contentW) / 2;
-            const offsetY = margin + (availH - contentH) / 2;
+            const offsetX = margin + (availW - contentW) / 2 + this.panX;
+            const offsetY = margin + (availH - contentH) / 2 + this.panY;
 
             // Set Screen Coordinates
             // Note: For maps (lat/lon), Y usually increases upwards (North),
@@ -637,6 +682,9 @@
             this.foundOptima = new Set();
             this.fBeta = 0;
             this.diversity = 0;
+            this.zoomLevel = 1;
+            this.panX = 0;
+            this.panY = 0;
 
             this.startTime = null;
             this.bestTime = 0;
@@ -830,14 +878,36 @@
 
           // --- Drawing ---
 
+          startDrag(e) {
+            this.isDragging = true;
+            this.dragStartX = e.clientX;
+            this.dragStartY = e.clientY;
+          },
+
+          stopDrag() {
+            this.isDragging = false;
+          },
+
           handleMouseMove(e) {
             const rect = this.canvas.getBoundingClientRect();
             this.mouseX = e.clientX - rect.left;
             this.mouseY = e.clientY - rect.top;
+
+            if (this.isDragging) {
+                const dx = e.clientX - this.dragStartX;
+                const dy = e.clientY - this.dragStartY;
+                this.panX += dx;
+                this.panY += dy;
+                this.dragStartX = e.clientX;
+                this.dragStartY = e.clientY;
+                this.updateScreenCoordinates();
+            }
+
             if (!this.running) this.draw();
           },
 
           handleMouseLeave() {
+            this.stopDrag();
             this.mouseX = -1;
             this.mouseY = -1;
             if (!this.running) this.draw();
