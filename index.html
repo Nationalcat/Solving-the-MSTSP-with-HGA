@@ -308,7 +308,6 @@
         return {
           ...getHGALogic(),
           cityCount: 30,
-          salesmenCount: 1,
           solutionCount: 0, // Initial number of islands
           problemId: "MSTSP-1",
           foundOptima: new Set(),
@@ -522,7 +521,6 @@
           exportState() {
             const state = {
               problemId: this.problemId,
-              salesmenCount: this.salesmenCount,
               generation: this.generation,
               globalBestDistance: this.globalBestDistance,
               nodes: this.nodes.map((n) => ({
@@ -591,9 +589,6 @@
             this.evalCities = this.originalCities;
             this.evalDepot = this.originalDepot;
 
-            // Restore salesmen count if available, else default to 1
-            this.salesmenCount = state.salesmenCount || 1;
-
             // 2. Restore Metrics
             this.generation = state.generation || 0;
             this.globalBestDistance = state.globalBestDistance || Infinity;
@@ -648,7 +643,6 @@
                   type: "init",
                   data: {
                     cityCount: this.cityCount,
-                    salesmenCount: this.salesmenCount,
                     evalCities: JSON.parse(JSON.stringify(this.evalCities)),
                     evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
                     problemId: this.problemId,
@@ -703,16 +697,10 @@
             // Use Original Coordinates for Evaluation
             this.evalCities = this.originalCities;
             this.evalDepot = this.originalDepot;
-            this.salesmenCount = 1;
 
             // Initialize HGA Tree Structure
             this.nodes = [];
             // this.bestSolutions = []; // Removed, using nodes directly
-
-            // Ensure salesmenCount <= cityCount
-            if (this.salesmenCount > this.cityCount) {
-              this.salesmenCount = this.cityCount;
-            }
 
             // Create Root Node (ID: 0)
             this.nodes.push({
@@ -785,7 +773,6 @@
                   type: "init",
                   data: {
                     cityCount: this.cityCount,
-                    salesmenCount: this.salesmenCount,
                     evalCities: JSON.parse(JSON.stringify(this.evalCities)),
                     evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
                     problemId: this.problemId,
@@ -949,13 +936,7 @@
 
             for (let i = 0; i < genome.length; i++) {
               const index = genome[i];
-              let nextPos;
-
-              if (index < this.cityCount) {
-                nextPos = this.cities[index];
-              } else {
-                nextPos = this.depot;
-              }
+              const nextPos = this.cities[index];
 
               if (
                 this.pointToLineDistance(
@@ -1039,7 +1020,6 @@
                     type: "init",
                     data: {
                       cityCount: this.cityCount,
-                      salesmenCount: this.salesmenCount,
                       evalCities: JSON.parse(JSON.stringify(this.evalCities)),
                       evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
                       problemId: this.problemId,
@@ -1168,17 +1148,10 @@
 
           drawPath(genome, color, isPrimary) {
             let currentPos = this.depot;
-            let salesmanIndex = 0;
 
             this.ctx.lineWidth = isPrimary ? 3 : 1.5;
             this.ctx.lineJoin = "round";
             this.ctx.lineCap = "round";
-
-            // If mTSP (m > 1), we might want to use different colors for salesmen
-            // BUT for Multi-Solution view, it's better to color by Solution ID.
-            // So we use the passed 'color' for the whole path.
-            // To distinguish salesmen in mTSP mode, we can use dashes or just keep it simple.
-            // Let's stick to single color per Solution for clarity.
 
             this.ctx.beginPath();
             this.ctx.strokeStyle = color;
@@ -1189,23 +1162,8 @@
 
             for (let i = 0; i < genome.length; i++) {
               const index = genome[i];
-              let nextPos;
-              let isDepot = false;
-
-              if (index < this.cityCount) {
-                nextPos = this.cities[index];
-              } else {
-                nextPos = this.depot;
-                isDepot = true;
-              }
-
+              const nextPos = this.cities[index];
               this.ctx.lineTo(nextPos.x, nextPos.y);
-
-              if (isDepot) {
-                this.ctx.stroke();
-                this.ctx.beginPath();
-                this.ctx.moveTo(nextPos.x, nextPos.y);
-              }
             }
 
             this.ctx.lineTo(this.depot.x, this.depot.y);

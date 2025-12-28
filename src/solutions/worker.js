@@ -5,7 +5,6 @@ const logic = getHGALogic();
 // Mock the Vue instance 'this' context
 const context = {
     cityCount: 0,
-    salesmenCount: 1,
     evalCities: [],
     evalDepot: null,
     problemId: '',
@@ -32,7 +31,6 @@ self.onmessage = function(e) {
     if (type === 'init') {
         // Initialize context
         context.cityCount = data.cityCount;
-        context.salesmenCount = data.salesmenCount;
         context.evalCities = data.evalCities;
         context.evalDepot = data.evalDepot;
         context.problemId = data.problemId;

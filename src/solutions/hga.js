@@ -3,40 +3,7 @@ function getHGALogic() {
     createValidGenome() {
       let cities = Array.from({ length: this.cityCount }, (_, i) => i);
       this.shuffle(cities);
-
-      if (this.salesmenCount === 1) return cities;
-
-      // mTSP Logic for > 1 salesman
-      if (this.salesmenCount > this.cityCount) {
-        return this.shuffle(
-          Array.from(
-            { length: this.cityCount + this.salesmenCount - 1 },
-            (_, i) => i
-          )
-        );
-      }
-
-      let possibleSplits = Array.from(
-        { length: this.cityCount - 1 },
-        (_, i) => i + 1
-      );
-      this.shuffle(possibleSplits);
-      let splits = possibleSplits
-        .slice(0, this.salesmenCount - 1)
-        .sort((a, b) => a - b);
-
-      let genome = [];
-      let currentCityIdx = 0;
-      let separatorIdx = this.cityCount;
-
-      for (let split of splits) {
-        while (currentCityIdx < split) genome.push(cities[currentCityIdx++]);
-        genome.push(separatorIdx++);
-      }
-      while (currentCityIdx < this.cityCount)
-        genome.push(cities[currentCityIdx++]);
-
-      return genome;
+      return cities;
     },
 
     shuffle(array) {
@@ -92,8 +59,7 @@ function getHGALogic() {
         let currentCity = -1; // -1 is Depot
 
         for (let i = 0; i < genome.length; i++) {
-          let nextCity = genome[i];
-          if (nextCity >= this.cityCount) nextCity = -1;
+          const nextCity = genome[i];
 
           const u = currentCity;
           const v = nextCity;
@@ -127,8 +93,7 @@ function getHGALogic() {
       let currentCity = -1; // -1 represents Depot
 
       for (let i = 0; i < genome.length; i++) {
-        let nextCity = genome[i];
-        if (nextCity >= this.cityCount) nextCity = -1;
+        const nextCity = genome[i];
 
         const u = currentCity;
         const v = nextCity;
@@ -227,35 +192,17 @@ function getHGALogic() {
       };
 
       let currentPos = useDepot;
-      let citiesInRoute = 0;
-      let penalty = 0;
-      // Only apply penalty for MSTSP problems to enforce valid mTSP solutions
-      // For real-world maps, we just want the distance
-      const PENALTY_AMOUNT = isMSTSP ? 100000 : 0;
 
       for (let i = 0; i < genome.length; i++) {
         const index = genome[i];
-        let nextPos;
-
-        if (index < this.cityCount) {
-          nextPos = useCities[index];
-          citiesInRoute++;
-        } else {
-          if (citiesInRoute === 0) penalty += PENALTY_AMOUNT;
-          nextPos = useDepot;
-          citiesInRoute = 0;
-        }
-
+        const nextPos = useCities[index];
         totalDist += getDist(currentPos, nextPos);
         currentPos = nextPos;
       }
 
-      if (citiesInRoute === 0 && this.salesmenCount > 1)
-        penalty += PENALTY_AMOUNT;
-
       totalDist += getDist(currentPos, useDepot);
 
-      return totalDist + penalty;
+      return totalDist;
     },
 
     evolve() {
