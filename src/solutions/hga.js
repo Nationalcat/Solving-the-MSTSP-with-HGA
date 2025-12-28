@@ -202,12 +202,36 @@ function getHGALogic() {
       // Use evaluation coordinates (Original or Screen)
       const useCities = this.evalCities || this.cities;
       const useDepot = this.evalDepot || this.depot;
-      const shouldRound = this.problemId.toString().startsWith("MSTSP-");
+      const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+      
+      // Helper for Haversine Distance (returns km)
+      const getDist = (p1, p2) => {
+        if (isMSTSP) {
+            // Euclidean for MSTSP
+            let d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+            return Math.round(d);
+        } else {
+            // Haversine for Real World (Lat/Lon)
+            // p.x = lon, p.y = lat
+            const R = 6371; // Earth radius in km
+            const dLat = (p2.y - p1.y) * Math.PI / 180;
+            const dLon = (p2.x - p1.x) * Math.PI / 180;
+            const lat1 = p1.y * Math.PI / 180;
+            const lat2 = p2.y * Math.PI / 180;
+
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+      };
 
       let currentPos = useDepot;
       let citiesInRoute = 0;
       let penalty = 0;
-      const PENALTY_AMOUNT = 100000;
+      // Only apply penalty for MSTSP problems to enforce valid mTSP solutions
+      // For real-world maps, we just want the distance
+      const PENALTY_AMOUNT = isMSTSP ? 100000 : 0;
 
       for (let i = 0; i < genome.length; i++) {
         const index = genome[i];
@@ -222,25 +246,14 @@ function getHGALogic() {
           citiesInRoute = 0;
         }
 
-        let dist = Math.hypot(
-          currentPos.x - nextPos.x,
-          currentPos.y - nextPos.y
-        );
-        if (shouldRound) dist = Math.round(dist);
-        totalDist += dist;
-        
+        totalDist += getDist(currentPos, nextPos);
         currentPos = nextPos;
       }
 
       if (citiesInRoute === 0 && this.salesmenCount > 1)
         penalty += PENALTY_AMOUNT;
 
-      let returnDist = Math.hypot(
-        currentPos.x - useDepot.x,
-        currentPos.y - useDepot.y
-      );
-      if (shouldRound) returnDist = Math.round(returnDist);
-      totalDist += returnDist;
+      totalDist += getDist(currentPos, useDepot);
 
       return totalDist + penalty;
     },
