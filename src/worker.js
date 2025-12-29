@@ -1,4 +1,4 @@
-importScripts('hga.js');
+importScripts('./algorithms/hga.js');
 
 const logic = getHGALogic();
 
