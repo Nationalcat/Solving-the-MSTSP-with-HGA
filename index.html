@@ -115,7 +115,9 @@
         </div>
       </div>
     </header>
-    <aside class="absolute sm:top-40 md:top-24 top-54 right-3 z-10 flex flex-col items-end min-w-[100px]">
+    <aside
+      class="absolute sm:top-40 md:top-24 top-54 right-3 z-10 flex flex-col items-end min-w-[100px]"
+    >
       <div class="text-xs text-gray-400">最佳距離</div>
       <div
         x-text="globalBestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')"
@@ -211,41 +213,43 @@
 
         <!-- Scrollable List -->
         <div class="overflow-y-auto px-4 min-h-0">
-          <template x-for="node in nodes" :key="node.id">
-            <div
-              class="flex items-center gap-3 mb-1 cursor-pointer hover:bg-gray-700/50 p-1 rounded"
-              x-show="node.type === 'leaf'"
-              @click="node.visible = !node.visible; if(!running) draw()"
-            >
+          <template x-if="!loading">
+            <template x-for="node in nodes" :key="node.id">
               <div
-                class="w-3 h-3 rounded border flex items-center justify-center transition-colors"
-                :class="node.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
+                class="flex items-center gap-3 mb-1 cursor-pointer hover:bg-gray-700/50 p-1 rounded"
+                x-show="node.type === 'leaf'"
+                @click="node.visible = !node.visible; if(!running) draw()"
               >
-                <svg
-                  x-show="node.visible"
-                  class="w-2 h-2 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+                <div
+                  class="w-3 h-3 rounded border flex items-center justify-center transition-colors"
+                  :class="node.visible ? 'bg-blue-500 border-blue-500' : 'border-gray-500 bg-transparent'"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="4"
-                    d="M5 13l4 4L19 7"
-                  ></path>
-                </svg>
+                  <svg
+                    x-show="node.visible"
+                    class="w-2 h-2 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="4"
+                      d="M5 13l4 4L19 7"
+                    ></path>
+                  </svg>
+                </div>
+                <div
+                  class="w-8 h-1 rounded"
+                  :style="`background-color: ${node.color}; opacity: ${node.visible ? 1 : 0.3}`"
+                ></div>
+                <span
+                  class="text-xs text-gray-300 font-mono select-none"
+                  x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')}`"
+                  :class="{'opacity-50': !node.visible}"
+                ></span>
               </div>
-              <div
-                class="w-8 h-1 rounded"
-                :style="`background-color: ${node.color}; opacity: ${node.visible ? 1 : 0.3}`"
-              ></div>
-              <span
-                class="text-xs text-gray-300 font-mono select-none"
-                x-text="`Sol ${node.id}: ${(!node.bestDistance || node.bestDistance === Infinity) ? '-' : node.bestDistance.toFixed(0) + (problemId.startsWith('MSTSP-') ? '' : ' km')}`"
-                :class="{'opacity-50': !node.visible}"
-              ></span>
-            </div>
+            </template>
           </template>
         </div>
 
@@ -279,16 +283,29 @@
 
       <!-- Zoom Controls -->
       <div class="absolute bottom-6 right-6 flex flex-row gap-2 items-center">
-        <div class="text-xs font-mono text-gray-300 bg-gray-800/90 rounded px-2 py-1 border border-gray-700 shadow-xl backdrop-blur-md min-w-[3.5rem] text-center select-none">
-            <span x-text="Math.round(zoomLevel * 100) + '%'"></span>
+        <div
+          class="text-xs font-mono text-gray-300 bg-gray-800/90 rounded px-2 py-1 border border-gray-700 shadow-xl backdrop-blur-md min-w-[3.5rem] text-center select-none"
+        >
+          <span x-text="Math.round(zoomLevel * 100) + '%'"></span>
         </div>
         <button
           @click="zoomOut()"
           class="p-2 bg-gray-800/90 hover:bg-gray-700 rounded-lg backdrop-blur-md border border-gray-700 shadow-xl text-white transition-colors"
           title="Zoom Out"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M20 12H4"
+            />
           </svg>
         </button>
         <button
@@ -296,8 +313,19 @@
           class="p-2 bg-gray-800/90 hover:bg-gray-700 rounded-lg backdrop-blur-md border border-gray-700 shadow-xl text-white transition-colors"
           title="Zoom In"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+            />
           </svg>
         </button>
       </div>
@@ -311,6 +339,7 @@
           solutionCount: 0, // Initial number of islands
           problemId: "MSTSP-1",
           foundOptima: new Set(),
+          loading: false,
           groundTruth: {
             "MSTSP-1": { optLength: 680, optCount: 3 },
             "MSTSP-2": { optLength: 1265, optCount: 4 },
@@ -571,6 +600,7 @@
 
           loadState(state) {
             this.stop();
+            this.loading = true;
 
             if (!state || !state.nodes || !Array.isArray(state.nodes)) {
               throw new Error("Invalid state file format: missing nodes");
@@ -583,7 +613,6 @@
 
             // Regenerate cities based on the ID (updates originalCities, cityCount, bounds)
             this.generateCities(this.problemId);
-
             // CRITICAL: Update evaluation context to match the new problem
             // This ensures workers get the correct coordinates
             this.evalCities = this.originalCities;
@@ -596,7 +625,6 @@
             this.diversity = state.diversity || 0;
             this.bestTime = state.bestTime || 0;
             this.bestGeneration = state.bestGeneration || 0;
-
             // 3. Restore Nodes
             this.nodes = state.nodes.map((n) => ({
               ...n,
@@ -662,6 +690,7 @@
             });
 
             this.draw();
+            this.$nextTick(() => this.loading = false)
           },
 
           scheduleReset() {
@@ -881,13 +910,13 @@
             this.mouseY = e.clientY - rect.top;
 
             if (this.isDragging) {
-                const dx = e.clientX - this.dragStartX;
-                const dy = e.clientY - this.dragStartY;
-                this.panX += dx;
-                this.panY += dy;
-                this.dragStartX = e.clientX;
-                this.dragStartY = e.clientY;
-                this.updateScreenCoordinates();
+              const dx = e.clientX - this.dragStartX;
+              const dy = e.clientY - this.dragStartY;
+              this.panX += dx;
+              this.panY += dy;
+              this.dragStartX = e.clientX;
+              this.dragStartY = e.clientY;
+              this.updateScreenCoordinates();
             }
 
             if (!this.running) this.draw();

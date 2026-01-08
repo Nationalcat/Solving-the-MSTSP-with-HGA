@@ -47,8 +47,15 @@ self.onmessage = function(e) {
         }];
         
         // Create initial population
-        for (let i = 0; i < context.popSize; i++) {
-            context.nodes[0].population.push(context.createValidGenome());
+        if (data.initialBestGenome) {
+            context.nodes[0].population.push(data.initialBestGenome);
+            for (let i = 1; i < context.popSize; i++) {
+                context.nodes[0].population.push(context.createValidGenome());
+            }
+        } else {
+            for (let i = 0; i < context.popSize; i++) {
+                context.nodes[0].population.push(context.createValidGenome());
+            }
         }
         
         context.evaluate();
