@@ -163,44 +163,55 @@ function getHGALogic() {
     },
 
     calculateDistance(genome) {
-      let totalDist = 0;
-      // Use evaluation coordinates (Original or Screen)
-      const useCities = this.evalCities || this.cities;
-      const useDepot = this.evalDepot || this.depot;
-      const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+      const N = this.cityCount;
       
-      // Helper for Haversine Distance (returns km)
-      const getDist = (p1, p2) => {
-        if (isMSTSP) {
-            // Euclidean for MSTSP
-            let d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
-            return Math.round(d);
-        } else {
-            // Haversine for Real World (Lat/Lon)
-            // p.x = lon, p.y = lat
-            const R = 6371; // Earth radius in km
-            const dLat = (p2.y - p1.y) * Math.PI / 180;
-            const dLon = (p2.x - p1.x) * Math.PI / 180;
-            const lat1 = p1.y * Math.PI / 180;
-            const lat2 = p2.y * Math.PI / 180;
+      // Pre-compute the distance matrix once per problem
+      if (!this.distanceMatrix) {
+        const useCities = this.evalCities || this.cities;
+        const useDepot = this.evalDepot || this.depot;
+        const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+        
+        const getDist = (p1, p2) => {
+          if (isMSTSP) {
+              let d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+              return Math.round(d);
+          } else {
+              const R = 6371; // Earth radius in km
+              const dLat = (p2.y - p1.y) * Math.PI / 180;
+              const dLon = (p2.x - p1.x) * Math.PI / 180;
+              const lat1 = p1.y * Math.PI / 180;
+              const lat2 = p2.y * Math.PI / 180;
 
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
+              const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                        Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              return R * c;
+          }
+        };
+
+        const allPoints = [...useCities, useDepot]; // Depot is at index N
+        const numPoints = N + 1;
+        const dists = Array.from({ length: numPoints }, () => new Float32Array(numPoints));
+        for (let i = 0; i < numPoints; i++) {
+          for (let j = 0; j < numPoints; j++) {
+            dists[i][j] = getDist(allPoints[i], allPoints[j]);
+          }
         }
-      };
-
-      let currentPos = useDepot;
-
-      for (let i = 0; i < genome.length; i++) {
-        const index = genome[i];
-        const nextPos = useCities[index];
-        totalDist += getDist(currentPos, nextPos);
-        currentPos = nextPos;
+        this.distanceMatrix = dists;
       }
 
-      totalDist += getDist(currentPos, useDepot);
+      // Fast evaluation using distance lookup matrix
+      let totalDist = 0;
+      const N_depot = N; // Depot is at index N
+      let currentIdx = N_depot;
+
+      for (let i = 0; i < genome.length; i++) {
+        const nextIdx = genome[i];
+        totalDist += this.distanceMatrix[currentIdx][nextIdx];
+        currentIdx = nextIdx;
+      }
+
+      totalDist += this.distanceMatrix[currentIdx][N_depot];
 
       return totalDist;
     },
@@ -289,7 +300,11 @@ function getHGALogic() {
       };
 
       for (let i = 0; i < this.popSize; i++) {
-        newNode.population.push(this.createValidGenome());
+        if (this.edgeProbabilities) {
+          newNode.population.push(this.createValidGenomeGNN(this.edgeProbabilities));
+        } else {
+          newNode.population.push(this.createValidGenome());
+        }
       }
 
       this.nodes.push(newNode);
@@ -309,7 +324,13 @@ function getHGALogic() {
         const p1 = this.tournamentSelect(node.population);
         const p2 = this.tournamentSelect(node.population);
         let child = this.crossover(p1, p2);
-        if (Math.random() < 0.5) this.mutate(child); // Increased mutation rate from 0.1 to 0.5
+        if (Math.random() < 0.5) {
+          if (this.edgeProbabilities) {
+            this.mutateGNN(child, this.edgeProbabilities);
+          } else {
+            this.mutate(child);
+          }
+        }
         newPop.push(child);
       }
 
@@ -390,17 +411,28 @@ function getHGALogic() {
     },
 
     crossover(p1, p2) {
-      const start = Math.floor(Math.random() * p1.length);
-      const end = Math.floor(Math.random() * (p1.length - start)) + start;
-      const child = new Array(p1.length).fill(-1);
+      const N = p1.length;
+      const start = Math.floor(Math.random() * N);
+      const end = Math.floor(Math.random() * (N - start)) + start;
+      const child = new Array(N).fill(-1);
+      const inChild = new Uint8Array(N);
 
-      for (let i = start; i <= end; i++) child[i] = p1[i];
+      for (let i = start; i <= end; i++) {
+        const city = p1[i];
+        child[i] = city;
+        inChild[city] = 1;
+      }
 
       let p2Idx = 0;
-      for (let i = 0; i < child.length; i++) {
+      for (let i = 0; i < N; i++) {
         if (i >= start && i <= end) continue;
-        while (child.includes(p2[p2Idx])) p2Idx++;
-        child[i] = p2[p2Idx];
+        while (inChild[p2[p2Idx]]) {
+          p2Idx++;
+        }
+        const city = p2[p2Idx];
+        child[i] = city;
+        inChild[city] = 1;
+        p2Idx++;
       }
       return child;
     },
@@ -419,6 +451,227 @@ function getHGALogic() {
           right = end;
         while (left < right) {
           [genome[left], genome[right]] = [genome[right], genome[left]];
+          left++;
+          right--;
+        }
+      }
+    },
+
+    computeBuiltinGNNHeuristic(cities, depot) {
+      const N = cities.length;
+      const allNodes = [...cities, depot]; // Index 0 to N-1 are cities, N is depot
+      const distMatrix = Array.from({ length: N + 1 }, () => new Float32Array(N + 1));
+      
+      // Calculate distances and find average
+      let totalDist = 0;
+      let count = 0;
+      const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+
+      const getDist = (p1, p2) => {
+        if (isMSTSP) {
+            return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        } else {
+            const R = 6371; // Earth radius in km
+            const dLat = (p2.y - p1.y) * Math.PI / 180;
+            const dLon = (p2.x - p1.x) * Math.PI / 180;
+            const lat1 = p1.y * Math.PI / 180;
+            const lat2 = p2.y * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+      };
+
+      for (let i = 0; i <= N; i++) {
+        for (let j = i + 1; j <= N; j++) {
+          const d = getDist(allNodes[i], allNodes[j]);
+          distMatrix[i][j] = d;
+          distMatrix[j][i] = d;
+          totalDist += d;
+          count++;
+        }
+      }
+      
+      const avgDist = count > 0 ? totalDist / count : 1.0;
+      const edgeProbabilities = Array.from({ length: N + 1 }, () => new Float32Array(N + 1));
+      
+      // Compute GAT-like edge attention scores
+      for (let i = 0; i <= N; i++) {
+        let rowSum = 0;
+        const tempScores = new Float32Array(N + 1);
+        for (let j = 0; j <= N; j++) {
+          if (i === j) {
+            tempScores[j] = 0;
+          } else {
+            // Distance decay: closer nodes get higher scores
+            const score = Math.exp(-3.5 * (distMatrix[i][j] / avgDist));
+            tempScores[j] = score;
+            rowSum += score;
+          }
+        }
+        
+        // Row softmax/normalization
+        if (rowSum > 0) {
+          for (let j = 0; j <= N; j++) {
+            edgeProbabilities[i][j] = tempScores[j] / rowSum;
+          }
+        }
+      }
+      
+      // Make it symmetric: P = (P + P^T) / 2
+      for (let i = 0; i <= N; i++) {
+        for (let j = i + 1; j <= N; j++) {
+          const symScore = (edgeProbabilities[i][j] + edgeProbabilities[j][i]) / 2;
+          edgeProbabilities[i][j] = symScore;
+          edgeProbabilities[j][i] = symScore;
+        }
+      }
+      
+      return edgeProbabilities;
+    },
+
+    createValidGenomeGNN(edgeProbabilities) {
+      const N = this.cityCount;
+      
+      // Pre-compute the Top-K GNN neighbors for each node if not already done
+      if (!this.topGNNNeighbors) {
+        this.topGNNNeighbors = [];
+        const K = Math.min(25, N); // Look at top 25 neighbors
+        for (let i = 0; i <= N; i++) {
+          const row = [];
+          for (let j = 0; j <= N; j++) {
+            if (i !== j) {
+              row.push({ node: j, prob: edgeProbabilities[i][j] });
+            }
+          }
+          // Sort descending by probability
+          row.sort((a, b) => b.prob - a.prob);
+          // Keep top K nodes
+          this.topGNNNeighbors.push(row.slice(0, K).map(item => item.node));
+        }
+      }
+
+      const unvisited = new Set(Array.from({ length: N }, (_, i) => i));
+      const tour = [];
+      let curr = N; // Start from Depot (index N)
+      
+      const temp = 0.3; // Softmax temperature
+      
+      while (unvisited.size > 0) {
+        // Get pre-computed top neighbors for the current node
+        const neighbors = this.topGNNNeighbors[curr];
+        const candidates = [];
+        for (let i = 0; i < neighbors.length; i++) {
+          const neighbor = neighbors[i];
+          if (unvisited.has(neighbor)) {
+            candidates.push(neighbor);
+          }
+        }
+        
+        let nextCity = -1;
+        
+        if (candidates.length > 0) {
+          // Perform softmax and roulette-wheel selection over these few candidates
+          const scores = candidates.map(c => edgeProbabilities[curr][c]);
+          const maxScore = Math.max(...scores);
+          let sumExps = 0;
+          const exps = new Float32Array(candidates.length);
+          for (let i = 0; i < candidates.length; i++) {
+            exps[i] = Math.exp((scores[i] - maxScore) / temp);
+            sumExps += exps[i];
+          }
+          
+          const r = Math.random();
+          let cumulative = 0;
+          nextCity = candidates[candidates.length - 1];
+          for (let i = 0; i < candidates.length; i++) {
+            cumulative += exps[i] / sumExps;
+            if (r <= cumulative) {
+              nextCity = candidates[i];
+              break;
+            }
+          }
+        } else {
+          // Fallback: choose a random unvisited node quickly
+          const iterator = unvisited.values();
+          nextCity = iterator.next().value;
+        }
+        
+        unvisited.delete(nextCity);
+        tour.push(nextCity);
+        curr = nextCity;
+      }
+      
+      return tour;
+    },
+
+    mutateGNN(genome, edgeProbabilities) {
+      const N = genome.length;
+      
+      // Single-pass O(N) minimum search to find weakest edge
+      // Avoids object allocations and sorting overhead entirely
+      let minP = Infinity;
+      let weakestIdx = -1;
+      
+      let u = N; // Start at Depot (index N)
+      for (let i = 0; i < N; i++) {
+        const v = genome[i];
+        const p = edgeProbabilities[u][v];
+        if (p < minP) {
+          minP = p;
+          weakestIdx = i;
+        }
+        u = v;
+      }
+      
+      // Return edge to depot
+      const lastP = edgeProbabilities[u][N];
+      if (lastP < minP) {
+        minP = lastP;
+        weakestIdx = N;
+      }
+      
+      // With 70% probability, try to optimize around the weakest edge
+      if (Math.random() < 0.7 && weakestIdx !== -1) {
+        const i = weakestIdx;
+        if (i < N && i >= 0) {
+          const j = Math.floor(Math.random() * N);
+          if (i !== j) {
+            const start = Math.min(i, j);
+            const end = Math.max(i, j);
+            
+            // Reverse segment [start, end] in place
+            let left = start, right = end;
+            while (left < right) {
+              const tmp = genome[left];
+              genome[left] = genome[right];
+              genome[right] = tmp;
+              left++;
+              right--;
+            }
+            return;
+          }
+        }
+      }
+      
+      // Fallback to standard fast mutation
+      const i = Math.floor(Math.random() * N);
+      const j = Math.floor(Math.random() * N);
+      const tmp = genome[i];
+      genome[i] = genome[j];
+      genome[j] = tmp;
+      
+      if (Math.random() < 0.5) {
+        const a = Math.floor(Math.random() * N);
+        const b = Math.floor(Math.random() * N);
+        const start = Math.min(a, b);
+        const end = Math.max(a, b);
+        let left = start, right = end;
+        while (left < right) {
+          const t = genome[left];
+          genome[left] = genome[right];
+          genome[right] = t;
           left++;
           right--;
         }

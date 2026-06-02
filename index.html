@@ -8,6 +8,7 @@
       src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
     <title>MSTSP Visualization</title>
     <style>
       canvas {
@@ -77,6 +78,41 @@
               </template>
             </optgroup>
           </select>
+        </div>
+
+        <!-- GNN Mode Control -->
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-gray-400 font-medium">GNN 混合優化</label>
+          <select
+            x-model="gnnMode"
+            @change="if (gnnMode === 'onnx' && !onnxModelLoaded) { $refs.onnxInput.click(); } else { reset(); }"
+            class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-blue-500 h-[26px] w-36"
+          >
+            <option value="off">Off (標準 HGA)</option>
+            <option value="builtin">Built-in (內建 GNN)</option>
+            <option value="onnx">Custom (自訂 ONNX)</option>
+          </select>
+        </div>
+
+        <!-- Custom ONNX Upload button, visible only when gnnMode is 'onnx' -->
+        <div class="flex flex-col gap-1" x-show="gnnMode === 'onnx'">
+          <label class="text-xs text-gray-400 font-medium">載入 GNN 模型 (.onnx, .json)</label>
+          <button
+            @click="$refs.onnxInput.click()"
+            class="px-3 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs font-semibold transition border border-purple-500 hover:border-purple-400 h-[26px] flex items-center justify-center gap-1 shadow-lg shadow-purple-900/20"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+            </svg>
+            <span x-text="onnxModelLoaded ? '已載入模型' : '選擇檔案'"></span>
+          </button>
+          <input
+            x-ref="onnxInput"
+            type="file"
+            style="display: none"
+            @change="loadONNXModel($event)"
+            accept=".onnx,.json"
+          />
         </div>
 
         <!-- Buttons -->
@@ -332,6 +368,13 @@
     </main>
 
     <script>
+      // Global ONNX Runtime Web Configuration
+      if (typeof ort !== 'undefined') {
+        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/';
+        ort.env.wasm.numThreads = 1; // Force single thread to bypass SharedArrayBuffer block on local python servers
+        ort.env.wasm.simd = false; // Disable SIMD to prevent crashes on browsers/CPUs without SIMD support
+      }
+
       function mtspApp() {
         return {
           ...getHGALogic(),
@@ -367,13 +410,19 @@
             "MSTSP-24": { optLength: 9614, optCount: 36 },
             "MSTSP-25": { optLength: 9521, optCount: 26 },
           },
-          problems: {
+           problems: {
             ...mstspProblems,
             ...unimart,
             ...familymart,
             ...okmart,
             ...hilife,
           },
+          gnnMode: "off", // default to off
+          edgeProbabilities: null,
+          gnnBackgroundCanvas: null,
+          onnxModel: null,
+          gnnWeights: null,
+          onnxModelLoaded: false,
           running: false,
           generation: 0,
           globalBestDistance: 0,
@@ -528,6 +577,412 @@
             "#6cb2eb",
           ],
 
+          async computeGNN() {
+            if (this.gnnMode === 'off') {
+              this.edgeProbabilities = null;
+            } else if (this.gnnMode === 'builtin') {
+              // Compute built-in JS Heuristic GNN
+              this.edgeProbabilities = this.computeBuiltinGNNHeuristic(this.originalCities, this.originalDepot);
+            } else if (this.gnnMode === 'onnx') {
+              if (this.gnnWeights) {
+                const totalNodes = this.originalCities.length + 1;
+                
+                // If the JSON is a pre-computed sparse probability matrix, reconstruct and load it instantly!
+                if (this.gnnWeights.sparse) {
+                  const N = this.gnnWeights.N;
+                  if (N !== totalNodes) {
+                    alert(`錯誤：自訂機率矩陣維度與當前地圖點數不符！\n矩陣包含 ${N} 點（含起點），但當前地圖需要 ${totalNodes} 點。`);
+                    this.gnnWeights = null;
+                    this.onnxModelLoaded = false;
+                    this.gnnMode = 'off';
+                    this.reset();
+                    return;
+                  }
+                  const edgeProbs = Array.from({ length: N }, () => new Float32Array(N));
+                  const data = this.gnnWeights.data;
+                  for (const u in data) {
+                    const uIdx = parseInt(u);
+                    for (const v in data[u]) {
+                      const vIdx = parseInt(v);
+                      edgeProbs[uIdx][vIdx] = data[u][v];
+                    }
+                  }
+                  this.edgeProbabilities = edgeProbs;
+                  this.preRenderGNNBackground();
+                  return;
+                }
+                
+                // If the JSON is a pre-computed dense 2D probability matrix array, load it instantly!
+                if (Array.isArray(this.gnnWeights)) {
+                  const N = this.gnnWeights.length;
+                  if (N !== totalNodes) {
+                    alert(`錯誤：自訂機率矩陣維度與當前地圖點數不符！\n矩陣包含 ${N} 點（含起點），但當前地圖需要 ${totalNodes} 點。`);
+                    this.gnnWeights = null;
+                    this.onnxModelLoaded = false;
+                    this.gnnMode = 'off';
+                    this.reset();
+                    return;
+                  }
+                  this.edgeProbabilities = this.gnnWeights;
+                  this.preRenderGNNBackground();
+                  return;
+                }
+                
+                // RUN PURE JAVASCRIPT GNN INFERENCE! (100% stable, zero dependencies!)
+                try {
+                  const N = this.originalCities.length;
+                  const allNodes = [...this.originalCities, this.originalDepot];
+                  const totalNodes = allNodes.length; // N + 1
+                  
+                  // 1. Preprocess: Normalize coordinates to [0, 1]
+                  let minX = Infinity, maxX = -Infinity;
+                  let minY = Infinity, maxY = -Infinity;
+                  allNodes.forEach(p => {
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y;
+                    if (p.y > maxY) maxY = p.y;
+                  });
+                  const rangeX = maxX - minX || 1.0;
+                  const rangeY = maxY - minY || 1.0;
+                  const normalizedCoords = allNodes.map(p => [
+                    (p.x - minX) / rangeX,
+                    (p.y - minY) / rangeY
+                  ]);
+                  
+                  // 2. Preprocess: Compute normalized distance matrix
+                  const distMatrix = Array.from({ length: totalNodes }, () => new Float32Array(totalNodes));
+                  const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+                  const getDist = (p1, p2) => {
+                    if (isMSTSP) {
+                        return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                    } else {
+                        const R = 6371;
+                        const dLat = (p2.y - p1.y) * Math.PI / 180;
+                        const dLon = (p2.x - p1.x) * Math.PI / 180;
+                        const lat1 = p1.y * Math.PI / 180;
+                        const lat2 = p2.y * Math.PI / 180;
+                        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                                  Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                        return R * c;
+                    }
+                  };
+                  
+                  let maxD = 0;
+                  for (let i = 0; i < totalNodes; i++) {
+                    for (let j = i + 1; j < totalNodes; j++) {
+                      const d = getDist(allNodes[i], allNodes[j]);
+                      distMatrix[i][j] = d;
+                      distMatrix[j][i] = d;
+                      if (d > maxD) maxD = d;
+                    }
+                  }
+                  if (maxD > 0) {
+                    for (let i = 0; i < totalNodes; i++) {
+                      for (let j = 0; j < totalNodes; j++) {
+                        distMatrix[i][j] = distMatrix[i][j] / maxD;
+                      }
+                    }
+                  }
+                  
+                  // Helper function for matrix multiplication: C = A * B
+                  const matmul = (A, B) => {
+                    const rowsA = A.length;
+                    const colsA = A[0].length;
+                    const colsB = B[0].length;
+                    const C = Array.from({ length: rowsA }, () => new Float32Array(colsB));
+                    for (let i = 0; i < rowsA; i++) {
+                      for (let k = 0; k < colsA; k++) {
+                        const valA = A[i][k];
+                        if (valA === 0) continue;
+                        for (let j = 0; j < colsB; j++) {
+                          C[i][j] += valA * B[k][j];
+                        }
+                      }
+                    }
+                    return C;
+                  };
+                  
+                  // Helper for matrix addition with bias: C = A + b
+                  const addBias = (A, b) => {
+                    const rows = A.length;
+                    const cols = A[0].length;
+                    for (let i = 0; i < rows; i++) {
+                      for (let j = 0; j < cols; j++) {
+                        A[i][j] += b[j];
+                      }
+                    }
+                    return A;
+                  };
+                  
+                  // Helper for ReLU activation
+                  const relu = (A) => {
+                    const rows = A.length;
+                    const cols = A[0].length;
+                    for (let i = 0; i < rows; i++) {
+                      for (let j = 0; j < cols; j++) {
+                        if (A[i][j] < 0) A[i][j] = 0;
+                      }
+                    }
+                    return A;
+                  };
+                  
+                  // Extracted weights
+                  const W_embed = this.gnnWeights.node_embed_w; // d_model x 2
+                  const b_embed = this.gnnWeights.node_embed_b; // d_model
+                  const W_gcn1 = this.gnnWeights.gcn1_w;   // d_model x d_model
+                  const b_gcn1 = this.gnnWeights.gcn1_b;   // d_model
+                  const W_gcn2 = this.gnnWeights.gcn2_w;   // d_model x d_model
+                  const b_gcn2 = this.gnnWeights.gcn2_b;   // d_model
+                  const W_edge = this.gnnWeights.edge_proj_w; // d_model x d_model
+                  const b_edge = this.gnnWeights.edge_proj_b; // d_model
+                  const gamma = this.gnnWeights.gamma;
+                  const dist_decay = this.gnnWeights.dist_decay;
+                  
+                  const d_model = W_embed.length; // Read layer dimension size dynamically!
+                  
+                  // --- STEP 1: Node embedding ---
+                  // H0 = ReLU( normalizedCoords * W_embed^T + b_embed )
+                  const W_embed_T = Array.from({ length: 2 }, (_, i) => new Float32Array(W_embed.map(r => r[i])));
+                  let H = relu(addBias(matmul(normalizedCoords, W_embed_T), b_embed));
+                  
+                  // --- STEP 2: Compute Adjacency A = exp(-gamma * distMatrix) ---
+                  const A = Array.from({ length: totalNodes }, () => new Float32Array(totalNodes));
+                  for (let i = 0; i < totalNodes; i++) {
+                    let rowSum = 0;
+                    for (let j = 0; j < totalNodes; j++) {
+                      A[i][j] = Math.exp(-gamma * distMatrix[i][j]);
+                      rowSum += A[i][j];
+                    }
+                    const div = rowSum + 1e-6;
+                    for (let j = 0; j < totalNodes; j++) {
+                      A[i][j] /= div;
+                    }
+                  }
+                  
+                  // --- STEP 3: GCN Propagation ---
+                  // H1 = ReLU( A * H0 * W_gcn1^T + b_gcn1 )
+                  const W_gcn1_T = Array.from({ length: d_model }, (_, i) => new Float32Array(W_gcn1.map(r => r[i])));
+                  const AH = matmul(A, H);
+                  H = relu(addBias(matmul(AH, W_gcn1_T), b_gcn1));
+                  
+                  // H2 = ReLU( A * H1 * W_gcn2^T + b_gcn2 )
+                  const W_gcn2_T = Array.from({ length: d_model }, (_, i) => new Float32Array(W_gcn2.map(r => r[i])));
+                  const AH1 = matmul(A, H);
+                  H = relu(addBias(matmul(AH1, W_gcn2_T), b_gcn2));
+                  
+                  // --- STEP 4: Bilinear Edge Predictor ---
+                  // H_proj = H * W_edge^T + b_edge
+                  const W_edge_T = Array.from({ length: d_model }, (_, i) => new Float32Array(W_edge.map(r => r[i])));
+                  const H_proj = addBias(matmul(H, W_edge_T), b_edge);
+                  
+                  // similarity = H_proj * H^T
+                  const H_T = Array.from({ length: d_model }, (_, i) => new Float32Array(H.map(r => r[i])));
+                  const similarity = matmul(H_proj, H_T);
+                  
+                  // edgeProbs = Sigmoid( similarity - dist_decay * distMatrix )
+                  const edgeProbs = Array.from({ length: totalNodes }, () => new Float32Array(totalNodes));
+                  for (let i = 0; i < totalNodes; i++) {
+                    for (let j = 0; j < totalNodes; j++) {
+                      const logit = similarity[i][j] - dist_decay * distMatrix[i][j];
+                      edgeProbs[i][j] = 1 / (1 + Math.exp(-logit)); // Sigmoid
+                    }
+                  }
+                  
+                  // Symmetrize: P = (P + P^T) / 2
+                  for (let i = 0; i < totalNodes; i++) {
+                    for (let j = i + 1; j < totalNodes; j++) {
+                      const sym = (edgeProbs[i][j] + edgeProbs[j][i]) / 2;
+                      edgeProbs[i][j] = sym;
+                      edgeProbs[j][i] = sym;
+                    }
+                  }
+                  
+                  this.edgeProbabilities = edgeProbs;
+                } catch (err) {
+                  console.error("Pure JS GNN Inference failed:", err);
+                  this.edgeProbabilities = this.computeBuiltinGNNHeuristic(this.originalCities, this.originalDepot);
+                }
+              } else if (this.onnxModel) {
+                try {
+                  const actualN = this.originalCities.length;
+                  const allNodes = [...this.originalCities, this.originalDepot];
+                  const totalNodes = allNodes.length; // actualN + 1
+                  
+                  const targetN = 150; // Fixed static size of our ONNX model
+                  
+                  // Pad allNodes to exactly 150 elements by duplicating the depot
+                  while (allNodes.length < targetN) {
+                    allNodes.push({ x: this.originalDepot.x, y: this.originalDepot.y });
+                  }
+                  // Compute min/max to normalize coords in [0, 1]
+                  let minX = Infinity, maxX = -Infinity;
+                  let minY = Infinity, maxY = -Infinity;
+                  allNodes.forEach(p => {
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y;
+                    if (p.y > maxY) maxY = p.y;
+                  });
+                  const rangeX = maxX - minX || 1.0;
+                  const rangeY = maxY - minY || 1.0;
+                  
+                  const normalizedCoords = allNodes.map(p => [
+                    (p.x - minX) / rangeX,
+                    (p.y - minY) / rangeY
+                  ]);
+                  
+                  // Compute absolute distance matrix
+                  const distMatrix = Array.from({ length: targetN }, () => new Float32Array(targetN));
+                  const isMSTSP = this.problemId && this.problemId.toString().startsWith("MSTSP-");
+
+                  const getDist = (p1, p2) => {
+                    if (isMSTSP) {
+                        return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                    } else {
+                        const R = 6371;
+                        const dLat = (p2.y - p1.y) * Math.PI / 180;
+                        const dLon = (p2.x - p1.x) * Math.PI / 180;
+                        const lat1 = p1.y * Math.PI / 180;
+                        const lat2 = p2.y * Math.PI / 180;
+                        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                                  Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                        return R * c;
+                    }
+                  };
+                  
+                  let maxD = 0;
+                  for (let i = 0; i < targetN; i++) {
+                    for (let j = i + 1; j < targetN; j++) {
+                      const d = getDist(allNodes[i], allNodes[j]);
+                      distMatrix[i][j] = d;
+                      distMatrix[j][i] = d;
+                      // Only count actual nodes for maxD to keep physical scaling clean
+                      if (i < totalNodes && j < totalNodes && d > maxD) {
+                        maxD = d;
+                      }
+                    }
+                  }
+                  
+                  // Pre-normalize the distance matrix to [0, 1] for GCN compatibility
+                  if (maxD > 0) {
+                    for (let i = 0; i < targetN; i++) {
+                      for (let j = 0; j < targetN; j++) {
+                        distMatrix[i][j] = distMatrix[i][j] / maxD;
+                      }
+                    }
+                  }
+                  
+                  // Construct inputs for ONNX
+                  const coordsTensor = new ort.Tensor('float32', new Float32Array(normalizedCoords.flat()), [1, targetN, 2]);
+                  const distTensor = new ort.Tensor('float32', new Float32Array(distMatrix.flatMap(row => Array.from(row))), [1, targetN, targetN]);
+                  
+                  // Run inference
+                  const feeds = { coords: coordsTensor, dist_matrix: distTensor };
+                  const results = await this.onnxModel.run(feeds);
+                  
+                  // Extract output (edge probability matrix) and slice back to the actual size
+                  const outputData = results.edge_probabilities.data;
+                  const edgeProbs = Array.from({ length: totalNodes }, () => new Float32Array(totalNodes));
+                  for (let i = 0; i < totalNodes; i++) {
+                    for (let j = 0; j < totalNodes; j++) {
+                      edgeProbs[i][j] = outputData[i * targetN + j];
+                    }
+                  }
+                  
+                  this.edgeProbabilities = edgeProbs;
+                } catch (err) {
+                  console.error("ONNX Inference failed:", err);
+                  // Fallback silently to built-in heuristic to keep app functional
+                  this.edgeProbabilities = this.computeBuiltinGNNHeuristic(this.originalCities, this.originalDepot);
+                }
+              } else {
+                // Fallback silently to built-in heuristic when model is not yet uploaded
+                this.edgeProbabilities = this.computeBuiltinGNNHeuristic(this.originalCities, this.originalDepot);
+              }
+            }
+
+            this.preRenderGNNBackground();
+          },
+
+          async loadONNXModel(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const isJson = file.name.endsWith('.json');
+            
+            try {
+              if (isJson) {
+                const text = await file.text();
+                this.gnnWeights = JSON.parse(text);
+                this.onnxModelLoaded = true; // Use same loaded flag
+                this.onnxModel = null; // Clear ONNX session
+                alert("成功載入自訂 GNN 權重 JSON 檔案！將使用網頁端超快速純 JS 推論引擎。");
+              } else {
+                const arrayBuffer = await file.arrayBuffer();
+                const modelBytes = new Uint8Array(arrayBuffer);
+                this.onnxModel = await ort.InferenceSession.create(modelBytes, {
+                  executionProviders: ['wasm']
+                });
+                this.onnxModelLoaded = true;
+                this.gnnWeights = null; // Clear JSON weights
+                alert("成功載入自訂 ONNX 模型！已啟用超穩定 WASM 引擎。");
+              }
+              this.gnnMode = 'onnx';
+              this.reset();
+            } catch (err) {
+              console.error("GNN Model load failed:", err);
+              const errorMsg = err instanceof Error ? err.message : (err && err.message) || String(err);
+              alert("自訂 GNN 模型載入失敗：" + errorMsg);
+            }
+            event.target.value = "";
+          },
+
+          preRenderGNNBackground() {
+            if (this.gnnMode === 'off' || !this.edgeProbabilities || !this.cities || this.cities.length === 0) {
+              this.gnnBackgroundCanvas = null;
+              return;
+            }
+            
+            const N = this.cities.length;
+            const allScreenNodes = [...this.cities, this.depot];
+            
+            const bgCanvas = document.createElement('canvas');
+            bgCanvas.width = this.width;
+            bgCanvas.height = this.height;
+            const bgCtx = bgCanvas.getContext('2d');
+            
+            bgCtx.fillStyle = "#111827";
+            bgCtx.fillRect(0, 0, this.width, this.height);
+            
+            bgCtx.lineWidth = 1;
+            bgCtx.lineJoin = "round";
+            bgCtx.lineCap = "round";
+            
+            // Draw only meaningful probability edges. Scale threshold to avoid layout clutter on large N
+            const probThreshold = N > 500 ? 0.15 : 0.05;
+            
+            for (let i = 0; i <= N; i++) {
+              for (let j = i + 1; j <= N; j++) {
+                const prob = this.edgeProbabilities[i][j];
+                if (prob > probThreshold) {
+                  bgCtx.beginPath();
+                  bgCtx.moveTo(allScreenNodes[i].x, allScreenNodes[i].y);
+                  bgCtx.lineTo(allScreenNodes[j].x, allScreenNodes[j].y);
+                  
+                  const alpha = Math.min(prob * 0.7, 0.3);
+                  bgCtx.strokeStyle = `rgba(168, 85, 247, ${alpha})`;
+                  bgCtx.lineWidth = prob * 3;
+                  bgCtx.stroke();
+                }
+              }
+            }
+            
+            this.gnnBackgroundCanvas = bgCanvas;
+          },
+
           initApp() {
             this.canvas = document.getElementById("mainCanvas");
             this.ctx = this.canvas.getContext("2d");
@@ -539,6 +994,7 @@
               this.width = this.canvas.width;
               this.height = this.canvas.height;
               this.updateScreenCoordinates();
+              this.preRenderGNNBackground();
               if (!this.running) this.draw();
             };
             window.addEventListener("resize", resize);
@@ -698,7 +1154,7 @@
             this.resetTimeout = setTimeout(() => this.reset(), 100);
           },
 
-          reset() {
+          async reset() {
             this.stop();
             this.generation = 0;
             this.globalBestDistance = Infinity;
@@ -708,6 +1164,8 @@
             this.zoomLevel = 1;
             this.panX = 0;
             this.panY = 0;
+            this.topGNNNeighbors = null;
+            this.distanceMatrix = null;
 
             this.startTime = null;
             this.bestTime = 0;
@@ -715,6 +1173,9 @@
 
             // Initialize Cities & Depot
             this.generateCities(this.problemId);
+
+            // Compute GNN edge probabilities first
+            await this.computeGNN();
 
             // Set solution count based on ground truth
             if (this.groundTruth[this.problemId]) {
@@ -810,6 +1271,7 @@
                       JSON.stringify(this.groundTruth || {}),
                     ),
                     nodeId: node.id,
+                    edgeProbabilities: this.edgeProbabilities ? JSON.parse(JSON.stringify(this.edgeProbabilities)) : null,
                   },
                 });
 
@@ -817,8 +1279,7 @@
               }
             });
 
-            // this.evaluate(); // Workers do this now
-            // this.draw(); // Moved to worker callback
+            if (!this.running) this.draw();
           },
 
           toggle() {
@@ -1072,8 +1533,13 @@
           draw() {
             if (!this.drawingEnabled) return;
 
-            this.ctx.fillStyle = "#111827";
+             this.ctx.fillStyle = "#111827";
             this.ctx.fillRect(0, 0, this.width, this.height);
+
+            // Draw GNN edge probability network as glowing background from our pre-rendered canvas!
+            if (this.gnnMode !== 'off' && this.gnnBackgroundCanvas) {
+              this.ctx.drawImage(this.gnnBackgroundCanvas, 0, 0);
+            }
 
             // Draw Solutions (Leaves)
             // Iterate through nodes directly

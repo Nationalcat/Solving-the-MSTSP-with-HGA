@@ -36,6 +36,9 @@ self.onmessage = function(e) {
         context.problemId = data.problemId;
         context.popSize = data.popSize;
         context.groundTruth = data.groundTruth;
+        context.edgeProbabilities = data.edgeProbabilities;
+        context.topGNNNeighbors = null;
+        context.distanceMatrix = null;
         
         // Initialize single node for this worker
         context.nodes = [{
@@ -50,11 +53,19 @@ self.onmessage = function(e) {
         if (data.initialBestGenome) {
             context.nodes[0].population.push(data.initialBestGenome);
             for (let i = 1; i < context.popSize; i++) {
-                context.nodes[0].population.push(context.createValidGenome());
+                if (context.edgeProbabilities) {
+                    context.nodes[0].population.push(context.createValidGenomeGNN(context.edgeProbabilities));
+                } else {
+                    context.nodes[0].population.push(context.createValidGenome());
+                }
             }
         } else {
             for (let i = 0; i < context.popSize; i++) {
-                context.nodes[0].population.push(context.createValidGenome());
+                if (context.edgeProbabilities) {
+                    context.nodes[0].population.push(context.createValidGenomeGNN(context.edgeProbabilities));
+                } else {
+                    context.nodes[0].population.push(context.createValidGenome());
+                }
             }
         }
         
@@ -70,6 +81,10 @@ self.onmessage = function(e) {
         runEvolution();
     } else if (type === 'stop') {
         running = false;
+    } else if (type === 'gnn_update') {
+        // Dynamically update GNN edge probabilities during runtime
+        context.edgeProbabilities = data.edgeProbabilities;
+        context.topGNNNeighbors = null;
     } else if (type === 'migrate_in') {
         // Receive best solutions from other islands
         // data.migrants is an array of genomes
