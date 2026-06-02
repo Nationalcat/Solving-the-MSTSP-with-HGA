@@ -80,11 +80,40 @@ gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/7-11超商.js --weig
 
 ---
 
+### D. 模式三：GNN-Guided HGA 離線高速路徑求解器 (--hga)
+如果您希望在本地命令列中**同時跑 GNN 推理與 HGA 演化算法**以追求最優解，您可以啟用 HGA 離線求解器。
+
+這會先用 GPU 計算 GNN 邊機率，然後用該機率來引導 Python 高性能 HGA 引擎（支援多島嶼並行演化與 Cleared  niching 機制）。運行完畢後會輸出**標準的網頁狀態 JSON 檔**，可直接匯入網頁端渲染出動態路線！
+
+```shell
+# 1. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 HGA 狀態檔
+gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/OK超商.js --weights gnn/mstsp_gnn_weights.json --hga --generations 500 --pop_size 100 --islands 4 --out gnn/ok_hga_state.json
+```
+
+**參數說明：**
+*   `--hga`：啟動 GNN-Guided HGA 離線求解模式。
+*   `--generations`：演化世代數（預設：500）。
+*   `--pop_size`：每個島嶼的種群大小（預設：100）。
+*   `--islands`：並行演化的島嶼數量（預設：4，對應多個並行演化群體）。
+*   `--migration_interval`：基因遷移間隔世代數（預設：50）。
+*   `--out`：導出的 HGA 狀態備份檔案名稱（預設：`mstsp_hga_state.json`）。
+
+---
+
 ## 3. 網頁端加載說明
 
-在瀏覽器網頁端（`http://localhost:8000`）的 **GNN 混合優化** 模塊中：
+在瀏覽器網頁端（`http://localhost:8000`）中，您可以載入上述生成的所有 JSON 檔案：
+
+### A. 載入 GNN 邊預測機率/模型
+在頁面左上角的 **GNN 混合優化** 模組中：
 1. 將下拉式選單切換至 **Custom (自訂 GNN)**。
 2. 點擊 **選擇檔案** 按鈕。
-3. 您可以選擇兩種格式的 JSON 匯入：
-   * **匯入權重檔 (`mstsp_gnn_weights.json`)**：網頁會動態適應維度，並以極快速度（0.05ms）在瀏覽器 CPU 中執行神經網路前向計算（適用於小於 500 點的地圖）。
-   * **匯入預計算矩陣 (`seven_probs.json`)**：網頁會自動辨識並直接載入機率矩陣，**計算開銷為 0ms**，是解決 **6,080 點 7-11 地圖**的終極優化方案！
+3. 選擇以下格式之一：
+   * **`mstsp_gnn_weights.json` (GNN權重)**：網頁會動態適應維度並在瀏覽器 CPU 中執行前向矩陣推理。
+   * **`seven_probs.json` (預運算矩陣結果)**：網頁會自動辨識並直接載入機率矩陣，**計算開銷為 0ms**，是解決 **6,080 點 7-11 地圖**的終極優化方案！
+
+### B. 載入已計算好的 HGA 路徑與狀態 (一鍵視覺化)
+在頁面底部的按鈕群中：
+1. 點擊 **「匯入」** 按鈕。
+2. 選擇您在 **D 模式** 下利用 Python 計算好的 HGA 狀態檔案（例如：**`ok_hga_state.json`**）。
+3. 網頁會**瞬間渲染出完美的路徑軌跡線**，並將左側面板的「目前代數」、「最佳距離」、「運行時間」等統計數據完全更新！您也可以點擊「開始」讓網頁端接力演化，或是直接懸停鼠標觀看超商店名與地址。

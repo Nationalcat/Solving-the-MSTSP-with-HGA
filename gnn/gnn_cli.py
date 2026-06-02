@@ -155,7 +155,345 @@ def parse_cities_file(filepath):
         sys.exit(1)
 
 # =====================================================================
-# 5. CLI Execution Loop
+# 5. HGA Guided Optimization in Python
+# =====================================================================
+
+def calculate_distance_matrix(cities_list, is_mstsp=False):
+    N = len(cities_list)
+    dist_matrix = np.zeros((N, N), dtype=np.float32)
+    for i in range(N):
+        for j in range(N):
+            if i == j:
+                dist_matrix[i, j] = 0.0
+                continue
+            p1 = cities_list[i]
+            p2 = cities_list[j]
+            if is_mstsp:
+                d = np.hypot(p1['x'] - p2['x'], p1['y'] - p2['y'])
+                dist_matrix[i, j] = round(d)
+            else:
+                R = 6371.0  # Earth radius in km
+                dLat = np.radians(p2['y'] - p1['y'])
+                dLon = np.radians(p2['x'] - p1['x'])
+                lat1 = np.radians(p1['y'])
+                lat2 = np.radians(p2['y'])
+                
+                a = np.sin(dLat / 2)**2 + np.sin(dLon / 2)**2 * np.cos(lat1) * np.cos(lat2)
+                c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+                dist_matrix[i, j] = R * c
+    return dist_matrix
+
+def calculate_distance(tour, distance_matrix):
+    N = len(tour)
+    indices = np.empty(N + 2, dtype=np.int32)
+    indices[0] = N
+    indices[1:-1] = tour
+    indices[-1] = N
+    return float(distance_matrix[indices[:-1], indices[1:]].sum())
+
+def calculate_similarity(g1, g2):
+    N = len(g1)
+    def get_edges(g):
+        edges = set()
+        curr = N
+        for node in g:
+            u, v = curr, node
+            edges.add((u, v) if u < v else (v, u))
+            curr = node
+        u, v = curr, N
+        edges.add((u, v) if u < v else (v, u))
+        return edges
+
+    edges1 = get_edges(g1)
+    edges2 = get_edges(g2)
+    shared = len(edges1.intersection(edges2))
+    return shared / len(edges1)
+
+def create_valid_genome_gnn(top_gnn_neighbors, edge_probabilities, N):
+    unvisited = set(range(N))
+    tour = []
+    curr = N
+    temp = 0.3
+    
+    while len(unvisited) > 0:
+        neighbors = top_gnn_neighbors[curr]
+        candidates = [n for n in neighbors if n in unvisited]
+        
+        if len(candidates) > 0:
+            scores = np.array([edge_probabilities[curr, c] for c in candidates])
+            max_score = np.max(scores)
+            exps = np.exp((scores - max_score) / temp)
+            sum_exps = np.sum(exps)
+            probs = exps / sum_exps
+            probs = probs / np.sum(probs) # Force sum to exactly 1.0 to satisfy np.random.choice
+            next_city = np.random.choice(candidates, p=probs)
+        else:
+            next_city = next(iter(unvisited))
+            
+        unvisited.remove(next_city)
+        tour.append(next_city)
+        curr = next_city
+        
+    return tour
+
+def crossover(p1, p2):
+    N = len(p1)
+    start = np.random.randint(0, N)
+    end = np.random.randint(start, N)
+    
+    child = np.full(N, -1, dtype=np.int32)
+    in_child = np.zeros(N, dtype=np.bool_)
+    
+    child[start:end+1] = p1[start:end+1]
+    in_child[p1[start:end+1]] = True
+    
+    p2_idx = 0
+    for i in range(N):
+        if start <= i <= end:
+            continue
+        while in_child[p2[p2_idx]]:
+            p2_idx += 1
+        city = p2[p2_idx]
+        child[i] = city
+        in_child[city] = True
+        p2_idx += 1
+        
+    return child.tolist()
+
+def mutate_gnn(genome_list, edge_probabilities):
+    genome = np.array(genome_list, dtype=np.int32)
+    N = len(genome)
+    
+    min_p = float('inf')
+    weakest_idx = -1
+    
+    u = N
+    for i in range(N):
+        v = genome[i]
+        p = edge_probabilities[u, v]
+        if p < min_p:
+            min_p = p
+            weakest_idx = i
+        u = v
+        
+    last_p = edge_probabilities[u, N]
+    if last_p < min_p:
+        min_p = last_p
+        weakest_idx = N
+        
+    if np.random.random() < 0.7 and weakest_idx != -1:
+        i = weakest_idx
+        if 0 <= i < N:
+            j = np.random.randint(0, N)
+            if i != j:
+                start = min(i, j)
+                end = max(i, j)
+                genome[start:end+1] = genome[start:end+1][::-1]
+                return genome.tolist()
+                
+    i = np.random.randint(0, N)
+    j = np.random.randint(0, N)
+    genome[i], genome[j] = genome[j], genome[i]
+    
+    if np.random.random() < 0.5:
+        a = np.random.randint(0, N)
+        b = np.random.randint(0, N)
+        start = min(a, b)
+        end = max(a, b)
+        genome[start:end+1] = genome[start:end+1][::-1]
+        
+    return genome.tolist()
+
+class Individual:
+    __slots__ = ['genome', 'distance', 'fitness']
+    def __init__(self, genome, distance=0.0, fitness=0.0):
+        self.genome = genome
+        self.distance = distance
+        self.fitness = fitness
+
+class IslandNode:
+    def __init__(self, node_id, node_type, color):
+        self.id = node_id
+        self.type = node_type
+        self.color = color
+        self.population = []
+        self.best_genome = None
+        self.best_distance = float('inf')
+
+class PythonHGA:
+    def __init__(self, cities_list, problem_id, edge_probs, pop_size=100, islands=4, migration_interval=50):
+        self.cities_list = cities_list
+        self.problem_id = problem_id
+        self.edge_probs = edge_probs
+        self.pop_size = pop_size
+        self.islands_count = islands
+        self.migration_interval = migration_interval
+        
+        self.total_nodes = len(cities_list)
+        self.N = self.total_nodes - 1
+        
+        is_mstsp = problem_id.startswith("MSTSP-")
+        self.distance_matrix = calculate_distance_matrix(cities_list, is_mstsp)
+        
+        self.top_gnn_neighbors = []
+        K = min(25, self.N)
+        for i in range(self.total_nodes):
+            row = []
+            for j in range(self.total_nodes):
+                if i != j:
+                    row.append((j, float(edge_probs[i, j])))
+            row.sort(key=lambda x: x[1], reverse=True)
+            self.top_gnn_neighbors.append([x[0] for x in row[:K]])
+            
+        self.nodes = []
+        colors = ["#a855f7", "#3b82f6", "#10b981", "#f59e0b", "#ec4899", "#84cc16", "#06b6d4"]
+        self.nodes.append(IslandNode("island_root", "trunk", "#ffffff"))
+        for i in range(islands):
+            color = colors[i % len(colors)]
+            self.nodes.append(IslandNode(f"island_{i}", "leaf", color))
+            
+        for node in self.nodes:
+            node.population = []
+            for _ in range(self.pop_size):
+                genome = create_valid_genome_gnn(self.top_gnn_neighbors, self.edge_probs, self.N)
+                node.population.append(Individual(genome))
+                
+        self.global_best_distance = float('inf')
+        self.generation = 0
+        self.best_time = 0.0
+        self.best_generation = 0
+        
+    def evaluate(self):
+        global_best = float('inf')
+        for node in self.nodes:
+            node_best_dist = float('inf')
+            node_best_genome = None
+            
+            for ind in node.population:
+                dist = calculate_distance(ind.genome, self.distance_matrix)
+                ind.distance = dist
+                ind.fitness = 1.0 / (dist + 1.0)
+                
+                if dist < node_best_dist:
+                    node_best_dist = dist
+                    node_best_genome = list(ind.genome)
+                    
+            if node_best_genome:
+                node.best_distance = node_best_dist
+                node.best_genome = node_best_genome
+                
+            if node.best_distance < global_best:
+                global_best = node.best_distance
+                
+        if global_best < self.global_best_distance:
+            self.global_best_distance = global_best
+            self.best_generation = self.generation
+            
+    def evolve_node(self, node):
+        new_pop = []
+        
+        node.population.sort(key=lambda x: x.fitness, reverse=True)
+        elite_count = max(1, int(self.pop_size * 0.05))
+        for i in range(elite_count):
+            new_pop.append(Individual(list(node.population[i].genome), node.population[i].distance, node.population[i].fitness))
+            
+        def tournament_select(pop):
+            k = 5
+            best_ind = None
+            for _ in range(k):
+                ind = pop[np.random.randint(0, len(pop))]
+                if best_ind is None or ind.fitness > best_ind.fitness:
+                    best_ind = ind
+            return best_ind
+            
+        while len(new_pop) < self.pop_size:
+            p1 = tournament_select(node.population)
+            p2 = tournament_select(node.population)
+            child_genome = crossover(p1.genome, p2.genome)
+            if np.random.random() < 0.5:
+                child_genome = mutate_gnn(child_genome, self.edge_probs)
+            new_pop.append(Individual(child_genome))
+            
+        node.population = new_pop
+        
+    def migrate(self):
+        leaf_bests = []
+        for node in self.nodes:
+            if node.type == "leaf" and node.best_genome:
+                leaf_bests.append(Individual(list(node.best_genome), node.best_distance, 1.0 / (node.best_distance + 1.0)))
+                
+        root_node = self.nodes[0]
+        root_node.population.sort(key=lambda x: x.fitness, reverse=True)
+        
+        replace_idx = len(root_node.population) - 1
+        for migrant in leaf_bests:
+            if replace_idx >= 0:
+                root_node.population[replace_idx] = migrant
+                replace_idx -= 1
+                
+        for i in range(1, len(self.nodes)):
+            for j in range(i + 1, len(self.nodes)):
+                nodeA = self.nodes[i]
+                nodeB = self.nodes[j]
+                if nodeA.best_genome and nodeB.best_genome:
+                    sim = calculate_similarity(nodeA.best_genome, nodeB.best_genome)
+                    if sim > 0.8:
+                        worse_node = nodeA if nodeA.best_distance > nodeB.best_distance else nodeB
+                        for ind in worse_node.population:
+                            ind.genome = mutate_gnn(ind.genome, self.edge_probs)
+                            ind.distance = calculate_distance(ind.genome, self.distance_matrix)
+                            ind.fitness = 1.0 / (ind.distance + 1.0)
+                            
+    def run_generation(self):
+        self.generation += 1
+        for node in self.nodes:
+            self.evolve_node(node)
+            
+        if self.generation > 0 and self.generation % self.migration_interval == 0:
+            self.migrate()
+            
+        self.evaluate()
+
+    def export_state_dict(self):
+        solutions = [n.best_genome for n in self.nodes if n.best_genome]
+        diversity = 0.0
+        if len(solutions) >= 2:
+            total_sim = 0.0
+            pair_count = 0
+            for i in range(len(solutions)):
+                for j in range(i + 1, len(solutions)):
+                    total_sim += calculate_similarity(solutions[i], solutions[j])
+                    pair_count += 1
+            if pair_count > 0:
+                diversity = 1.0 - (total_sim / pair_count)
+                
+        nodes_exported = []
+        for n in self.nodes:
+            nodes_exported.append({
+                "id": str(n.id),
+                "type": str(n.type),
+                "bestGenome": [int(x) for x in n.best_genome] if n.best_genome is not None else None,
+                "bestDistance": float(n.best_distance) if n.best_distance != float('inf') else None,
+                "color": str(n.color),
+                "visible": True
+            })
+            
+        from datetime import datetime, timezone
+        state = {
+            "problemId": self.problem_id,
+            "generation": int(self.generation),
+            "globalBestDistance": float(self.global_best_distance),
+            "nodes": nodes_exported,
+            "fBeta": 0.0,
+            "diversity": float(diversity),
+            "bestTime": float(round(self.best_time, 2)),
+            "bestGeneration": int(self.best_generation),
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        }
+        return state
+
+# =====================================================================
+# 6. CLI Execution Loop
 # =====================================================================
 
 def main():
@@ -177,14 +515,26 @@ def main():
     parser.add_argument('--weights', type=str, default='mstsp_gnn_weights.json', help='Path to pre-trained GNN weights JSON (default: mstsp_gnn_weights.json)')
     
     # Output file
-    parser.add_argument('--out', type=str, help='Output filepath (defaults: mstsp_gnn_weights.json for training, mstsp_gnn_probs.json for inference)')
+    parser.add_argument('--out', type=str, help='Output filepath (defaults: mstsp_gnn_weights.json, mstsp_gnn_probs.json, or mstsp_hga_state.json)')
     parser.add_argument('--export_onnx', action='store_true', help='Also export a standard self-contained ONNX model')
+    
+    # HGA Optimization Parameters
+    parser.add_argument('--hga', action='store_true', help='Run GNN-guided Hybrid Genetic Algorithm (HGA)')
+    parser.add_argument('--generations', type=int, default=500, help='Number of generations for HGA (default: 500)')
+    parser.add_argument('--pop_size', type=int, default=100, help='Population size for HGA (default: 100)')
+    parser.add_argument('--islands', type=int, default=4, help='Number of islands (islands) in HGA (default: 4)')
+    parser.add_argument('--migration_interval', type=int, default=50, help='Migration interval for HGA (default: 50)')
 
     args = parser.parse_args()
     
     # Determine default outputs
     if not args.out:
-        args.out = 'mstsp_gnn_weights.json' if args.train else 'mstsp_gnn_probs.json'
+        if args.train:
+            args.out = 'mstsp_gnn_weights.json'
+        elif args.hga:
+            args.out = 'mstsp_hga_state.json'
+        else:
+            args.out = 'mstsp_gnn_probs.json'
         
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"Using compute device: {device.type.upper()}")
@@ -347,48 +697,118 @@ def main():
         
         print("4. Executing GNN forward pass natively...")
         with torch.no_grad():
-            # Executed in parallel on GPU/CPU!
             edge_probs_tensor = model(coords_tensor, dists_tensor)
             
         # Convert back to NumPy array
         edge_probs = edge_probs_tensor.squeeze(0).cpu().numpy()
         
-        # Optimize output format based on size
-        # If N > 300, export as a highly compressed sparse JSON to save 99% disk space and bypass browser string limits!
-        if total_nodes > 300:
-            print("   Large graph detected. Compressing to sparse GNN matrix to avoid browser string size limits...")
-            sparse_data = {}
-            # Keep top 30 highest probability edges per node
-            K = min(30, total_nodes)
-            for i in range(total_nodes):
-                row = edge_probs[i]
-                # Get indices of top K probabilities
-                top_indices = np.argsort(row)[-K:]
-                node_dict = {}
-                for idx in top_indices:
-                    prob = float(row[idx])
-                    if prob > 0.01:  # Only save meaningful probabilities
-                        node_dict[str(idx)] = round(prob, 4) # Round to 4 decimals to save massive text space
-                if node_dict:
-                    sparse_data[str(i)] = node_dict
-                    
-            output_payload = {
-                "sparse": True,
-                "N": total_nodes,
-                "data": sparse_data
-            }
-            print(f"   Compression complete. Sparse edges saved: {sum(len(v) for v in sparse_data.values())}")
-        else:
-            output_payload = edge_probs.tolist()
+        # Determine Problem ID from cities filepath to match frontend problems keys:
+        # Front-end keys are: "7-11", "全家", "OK超商", "萊爾富"
+        problem_id = "7-11"
+        lower_path = args.cities_file.lower()
+        if 'ok' in lower_path:
+            problem_id = "OK超商"
+        elif 'family' in lower_path or '全家' in lower_path:
+            problem_id = "全家"
+        elif 'hilife' in lower_path or '萊爾富' in lower_path:
+            problem_id = "萊爾富"
+        elif 'seven' in lower_path or '7-11' in lower_path or '711' in lower_path:
+            problem_id = "7-11"
+        elif 'mstsp-' in lower_path:
+            import re
+            match = re.search(r'mstsp-\w+', lower_path)
+            if match:
+                problem_id = match.group(0).upper()
+            else:
+                problem_id = "MSTSP-CUSTOM"
         
-        print(f"5. Exporting pre-computed edge probability matrix to: '{args.out}'...")
-        with open(args.out, 'w', encoding='utf-8') as f:
-            json.dump(output_payload, f)
+        # ==========================================
+        # SUBMODE A: Run GNN-Guided HGA solver
+        # ==========================================
+        if args.hga:
+            import time
+            print(f"\n--- Initializing GNN-Guided HGA Solver ---")
+            print(f"   Problem ID: {problem_id}")
+            print(f"   Population Size: {args.pop_size} | Islands: {args.islands} | Generations: {args.generations}")
             
-        print("\n🎉 GNN Inference completed successfully!")
-        print(f"👉 File size: {os.path.getsize(args.out) / (1024*1024):.2f} MB")
-        print(f"💡 Success: Drag-and-drop '{args.out}' directly into the web frontend GNN uploader under 'Custom' mode!")
-        print("   This bypasses browser calculations entirely, rendering instantly even for 6,000+ nodes!")
+            hga_solver = PythonHGA(
+                cities_list=cities_list,
+                problem_id=problem_id,
+                edge_probs=edge_probs,
+                pop_size=args.pop_size,
+                islands=args.islands,
+                migration_interval=args.migration_interval
+            )
+            
+            print("   Running HGA optimization...")
+            start_time = time.time()
+            
+            # Initial evaluation
+            hga_solver.evaluate()
+            
+            for gen in range(1, args.generations + 1):
+                hga_solver.run_generation()
+                
+                # Print progress every 50 generations or at the end
+                if gen % 50 == 0 or gen == 1 or gen == args.generations:
+                    elapsed = time.time() - start_time
+                    print(f"   Gen {gen:04d}/{args.generations:04d} | Best Distance: {hga_solver.global_best_distance:.3f} | Elapsed: {elapsed:.2f}s")
+                    
+            end_time = time.time()
+            hga_solver.best_time = end_time - start_time
+            
+            print(f"\n🎉 HGA Optimization Completed in {hga_solver.best_time:.2f}s!")
+            print(f"👉 Best Distance Found: {hga_solver.global_best_distance:.4f}")
+            print(f"👉 Found at Generation: {hga_solver.best_generation}")
+            
+            # Export state dictionary
+            state_data = hga_solver.export_state_dict()
+            
+            print(f"\n5. Exporting HGA state JSON to: '{args.out}'...")
+            with open(args.out, 'w', encoding='utf-8') as f:
+                json.dump(state_data, f, indent=2)
+                
+            print(f"👉 State successfully exported! File size: {os.path.getsize(args.out) / 1024:.2f} KB")
+            print(f"💡 Success: Open the web frontend, click 'Import', select '{args.out}', and visualize the routes instantly!")
+            
+        # ==========================================
+        # SUBMODE B: Standard precomputed matrix output
+        # ==========================================
+        else:
+            # Optimize output format based on size
+            if total_nodes > 300:
+                print("   Large graph detected. Compressing to sparse GNN matrix to avoid browser string size limits...")
+                sparse_data = {}
+                K = min(30, total_nodes)
+                for i in range(total_nodes):
+                    row = edge_probs[i]
+                    top_indices = np.argsort(row)[-K:]
+                    node_dict = {}
+                    for idx in top_indices:
+                        prob = float(row[idx])
+                        if prob > 0.01:
+                            node_dict[str(idx)] = round(prob, 4)
+                    if node_dict:
+                        sparse_data[str(i)] = node_dict
+                        
+                output_payload = {
+                    "sparse": True,
+                    "N": total_nodes,
+                    "data": sparse_data
+                }
+                print(f"   Compression complete. Sparse edges saved: {sum(len(v) for v in sparse_data.values())}")
+            else:
+                output_payload = edge_probs.tolist()
+            
+            print(f"5. Exporting pre-computed edge probability matrix to: '{args.out}'...")
+            with open(args.out, 'w', encoding='utf-8') as f:
+                json.dump(output_payload, f)
+                
+            print("\n🎉 GNN Inference completed successfully!")
+            print(f"👉 File size: {os.path.getsize(args.out) / (1024*1024):.2f} MB")
+            print(f"💡 Success: Drag-and-drop '{args.out}' directly into the web frontend GNN uploader under 'Custom' mode!")
+            print("   This bypasses browser calculations entirely, rendering instantly even for 6,000+ nodes!")
 
 if __name__ == '__main__':
     main()
+

@@ -27,6 +27,32 @@
     x-data="mtspApp()"
     x-init="initApp()"
   >
+    <!-- Beautiful Premium Page Loading Overlay -->
+    <div
+      x-show="loading"
+      x-transition:enter="transition ease-out duration-300"
+      x-transition:enter-start="opacity-0"
+      x-transition:enter-end="opacity-100"
+      x-transition:leave="transition ease-in duration-200"
+      x-transition:leave-start="opacity-100"
+      x-transition:leave-end="opacity-0"
+      class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-gray-950/80 backdrop-blur-md"
+    >
+      <div class="relative flex items-center justify-center">
+        <!-- Neon Glowing Background -->
+        <div class="absolute w-24 h-24 rounded-full bg-purple-500/25 blur-xl animate-pulse"></div>
+        <!-- Outer Neon Ring -->
+        <div class="w-16 h-16 rounded-full border-4 border-purple-500/20 border-t-purple-500 animate-spin"></div>
+      </div>
+      <!-- Loading Text -->
+      <h2 class="mt-6 text-base font-bold text-gray-100 tracking-wide animate-pulse">
+        智慧 GNN-HGA 混合優化引擎載入中...
+      </h2>
+      <p class="mt-2 text-[10px] text-purple-400 font-medium tracking-wider uppercase">
+        正在解析地圖數據、執行 GNN 剪枝並初始化分層島嶼群，請稍候
+      </p>
+    </div>
+
     <!-- Header / Controls -->
     <header
       class="p-4 bg-gray-800 shadow-lg z-10 flex flex-wrap gap-6 items-center justify-between border-b border-gray-700"
@@ -62,7 +88,7 @@
           <label class="text-xs text-gray-400 font-medium">問題 ID</label>
           <select
             x-model="problemId"
-            @change="reset()"
+            @change="gnnMode = 'off'; reset()"
             class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:outline-none focus:border-blue-500 h-[26px] w-32"
           >
             <optgroup label="MSTSP Benchmarks">
@@ -378,6 +404,39 @@
       function mtspApp() {
         return {
           ...getHGALogic(),
+          toRaw(obj) {
+            if (window.Alpine && typeof Alpine.raw === 'function') {
+              return Alpine.raw(obj);
+            }
+            if (obj === null || obj === undefined) return obj;
+            return JSON.parse(JSON.stringify(obj));
+          },
+
+          rawEdgeProbabilities() {
+            if (!this.edgeProbabilities) return null;
+            const raw = window.Alpine && typeof Alpine.raw === 'function' ? Alpine.raw(this.edgeProbabilities) : null;
+            if (raw) return raw;
+            return this.edgeProbabilities.map(row => new Float32Array(row));
+          },
+
+          rawEvalCities() {
+            if (!this.evalCities) return [];
+            return this.evalCities.map(c => ({
+              x: Number(c.x),
+              y: Number(c.y),
+              name: c.name ? String(c.name) : undefined,
+              address: c.address ? String(c.address) : undefined,
+              index: c.index !== undefined ? Number(c.index) : undefined
+            }));
+          },
+
+          rawEvalDepot() {
+            if (!this.evalDepot) return { x: 0, y: 0 };
+            return {
+              x: Number(this.evalDepot.x),
+              y: Number(this.evalDepot.y)
+            };
+          },
           cityCount: 30,
           solutionCount: 0, // Initial number of islands
           problemId: "MSTSP-1",
@@ -911,6 +970,10 @@
             const file = event.target.files[0];
             if (!file) return;
             
+            this.loading = true;
+            // Introduce a short pause to ensure the UI renders the loading overlay
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
             const isJson = file.name.endsWith('.json');
             
             try {
@@ -931,11 +994,13 @@
                 alert("成功載入自訂 ONNX 模型！已啟用超穩定 WASM 引擎。");
               }
               this.gnnMode = 'onnx';
-              this.reset();
+              await this.reset();
             } catch (err) {
               console.error("GNN Model load failed:", err);
               const errorMsg = err instanceof Error ? err.message : (err && err.message) || String(err);
               alert("自訂 GNN 模型載入失敗：" + errorMsg);
+            } finally {
+              this.loading = false;
             }
             event.target.value = "";
           },
@@ -1127,17 +1192,13 @@
                   type: "init",
                   data: {
                     cityCount: this.cityCount,
-                    evalCities: JSON.parse(JSON.stringify(this.evalCities)),
-                    evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                    evalCities: this.rawEvalCities(),
+                    evalDepot: this.rawEvalDepot(),
                     problemId: this.problemId,
                     popSize: this.popSize,
-                    groundTruth: JSON.parse(
-                      JSON.stringify(this.groundTruth || {}),
-                    ),
+                    groundTruth: this.toRaw(this.groundTruth) || {},
                     nodeId: node.id,
-                    initialBestGenome: node.bestGenome
-                      ? JSON.parse(JSON.stringify(node.bestGenome))
-                      : null,
+                    initialBestGenome: node.bestGenome ? [...node.bestGenome] : null,
                   },
                 });
 
@@ -1155,131 +1216,136 @@
           },
 
           async reset() {
-            this.stop();
-            this.generation = 0;
-            this.globalBestDistance = Infinity;
-            this.foundOptima = new Set();
-            this.fBeta = 0;
-            this.diversity = 0;
-            this.zoomLevel = 1;
-            this.panX = 0;
-            this.panY = 0;
-            this.topGNNNeighbors = null;
-            this.distanceMatrix = null;
+            this.loading = true;
+            // Let the browser UI thread render the loading spinner overlay first
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            try {
+              this.stop();
+              this.generation = 0;
+              this.globalBestDistance = Infinity;
+              this.foundOptima = new Set();
+              this.fBeta = 0;
+              this.diversity = 0;
+              this.zoomLevel = 1;
+              this.panX = 0;
+              this.panY = 0;
+              this.topGNNNeighbors = null;
+              this.distanceMatrix = null;
 
-            this.startTime = null;
-            this.bestTime = 0;
-            this.bestGeneration = 0;
+              this.startTime = null;
+              this.bestTime = 0;
+              this.bestGeneration = 0;
 
-            // Initialize Cities & Depot
-            this.generateCities(this.problemId);
+              // Initialize Cities & Depot
+              this.generateCities(this.problemId);
 
-            // Compute GNN edge probabilities first
-            await this.computeGNN();
+              // Compute GNN edge probabilities first
+              await this.computeGNN();
 
-            // Set solution count based on ground truth
-            if (this.groundTruth[this.problemId]) {
-              this.solutionCount = this.groundTruth[this.problemId].optCount;
-            } else {
-              this.solutionCount = 5;
-            }
+              // Set solution count based on ground truth
+              if (this.groundTruth[this.problemId]) {
+                this.solutionCount = this.groundTruth[this.problemId].optCount;
+              } else {
+                this.solutionCount = 5;
+              }
 
-            // Use Original Coordinates for Evaluation
-            this.evalCities = this.originalCities;
-            this.evalDepot = this.originalDepot;
+              // Use Original Coordinates for Evaluation
+              this.evalCities = this.originalCities;
+              this.evalDepot = this.originalDepot;
 
-            // Initialize HGA Tree Structure
-            this.nodes = [];
-            // this.bestSolutions = []; // Removed, using nodes directly
+              // Initialize HGA Tree Structure
+              this.nodes = [];
 
-            // Create Root Node (ID: 0)
-            this.nodes.push({
-              id: 0,
-              type: "root",
-              population: [],
-              bestGenome: null,
-              bestDistance: Infinity,
-              color: "#ffffff",
-              visible: false,
-            });
-
-            // Create Leaf Nodes (ID: 1 to k)
-            for (let k = 0; k < this.solutionCount; k++) {
-              const color = this.solutionColors[k % this.solutionColors.length];
-
-              // Create Node
+              // Create Root Node (ID: 0)
               this.nodes.push({
-                id: k + 1,
-                type: "leaf",
+                id: 0,
+                type: "root",
                 population: [],
                 bestGenome: null,
                 bestDistance: Infinity,
-                color: color,
-                visible: true,
+                color: "#ffffff",
+                visible: false,
               });
-            }
 
-            // Initialize Populations for all nodes
-            // Terminate old workers
-            if (this.workers) {
-              this.workers.forEach((w) => w.terminate());
-            }
-            this.workers = [];
+              // Create Leaf Nodes (ID: 1 to k)
+              for (let k = 0; k < this.solutionCount; k++) {
+                const color = this.solutionColors[k % this.solutionColors.length];
 
-            // Initialize Workers for Leaf Nodes
-            this.nodes.forEach((node) => {
-              if (node.type === "leaf") {
-                const worker = new Worker("src/worker.js");
+                // Create Node
+                this.nodes.push({
+                  id: k + 1,
+                  type: "leaf",
+                  population: [],
+                  bestGenome: null,
+                  bestDistance: Infinity,
+                  color: color,
+                  visible: true,
+                });
+              }
 
-                worker.onmessage = (e) => {
-                  const { type, bestGenome, bestDistance, generation } = e.data;
-                  if (type === "init_done") {
-                    node.bestDistance = bestDistance;
-                    node.bestGenome = bestGenome;
-                    // Update global best immediately after init
-                    if (bestDistance < this.globalBestDistance) {
-                      this.globalBestDistance = bestDistance;
-                    }
-                    // Draw immediately to show initial state
-                    if (!this.running) this.draw();
-                  } else if (type === "update") {
-                    node.bestGenome = bestGenome;
-                    node.bestDistance = bestDistance;
-                    // Update global best
-                    if (bestDistance < this.globalBestDistance) {
-                      this.globalBestDistance = bestDistance;
-                      this.bestGeneration = this.generation;
-                      if (this.startTime) {
-                        this.bestTime = (
-                          (Date.now() - this.startTime) /
-                          1000
-                        ).toFixed(2);
+              // Initialize Populations for all nodes
+              // Terminate old workers
+              if (this.workers) {
+                this.workers.forEach((w) => w.terminate());
+              }
+              this.workers = [];
+
+              // Initialize Workers for Leaf Nodes
+              this.nodes.forEach((node) => {
+                if (node.type === "leaf") {
+                  const worker = new Worker("src/worker.js");
+
+                  worker.onmessage = (e) => {
+                    const { type, bestGenome, bestDistance, generation } = e.data;
+                    if (type === "init_done") {
+                      node.bestDistance = bestDistance;
+                      node.bestGenome = bestGenome;
+                      // Update global best immediately after init
+                      if (bestDistance < this.globalBestDistance) {
+                        this.globalBestDistance = bestDistance;
+                      }
+                      // Draw immediately to show initial state
+                      if (!this.running) this.draw();
+                    } else if (type === "update") {
+                      node.bestGenome = bestGenome;
+                      node.bestDistance = bestDistance;
+                      // Update global best
+                      if (bestDistance < this.globalBestDistance) {
+                        this.globalBestDistance = bestDistance;
+                        this.bestGeneration = this.generation;
+                        if (this.startTime) {
+                          this.bestTime = (
+                            (Date.now() - this.startTime) /
+                            1000
+                          ).toFixed(2);
+                        }
                       }
                     }
-                  }
-                };
+                  };
 
-                worker.postMessage({
-                  type: "init",
-                  data: {
-                    cityCount: this.cityCount,
-                    evalCities: JSON.parse(JSON.stringify(this.evalCities)),
-                    evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
-                    problemId: this.problemId,
-                    popSize: this.popSize,
-                    groundTruth: JSON.parse(
-                      JSON.stringify(this.groundTruth || {}),
-                    ),
-                    nodeId: node.id,
-                    edgeProbabilities: this.edgeProbabilities ? JSON.parse(JSON.stringify(this.edgeProbabilities)) : null,
-                  },
-                });
+                  worker.postMessage({
+                    type: "init",
+                    data: {
+                      cityCount: this.cityCount,
+                      evalCities: this.rawEvalCities(),
+                      evalDepot: this.rawEvalDepot(),
+                      problemId: this.problemId,
+                      popSize: this.popSize,
+                      groundTruth: this.toRaw(this.groundTruth) || {},
+                      nodeId: node.id,
+                      edgeProbabilities: this.rawEdgeProbabilities(),
+                    },
+                  });
 
-                this.workers.push(worker);
-              }
-            });
+                  this.workers.push(worker);
+                }
+              });
 
-            if (!this.running) this.draw();
+              if (!this.running) this.draw();
+            } finally {
+              this.loading = false;
+            }
           },
 
           toggle() {
@@ -1510,14 +1576,13 @@
                     type: "init",
                     data: {
                       cityCount: this.cityCount,
-                      evalCities: JSON.parse(JSON.stringify(this.evalCities)),
-                      evalDepot: JSON.parse(JSON.stringify(this.evalDepot)),
+                      evalCities: this.rawEvalCities(),
+                      evalDepot: this.rawEvalDepot(),
                       problemId: this.problemId,
                       popSize: this.popSize,
-                      groundTruth: JSON.parse(
-                        JSON.stringify(this.groundTruth || {}),
-                      ),
+                      groundTruth: this.toRaw(this.groundTruth) || {},
                       nodeId: node.id,
+                      edgeProbabilities: this.rawEdgeProbabilities(),
                     },
                   });
                   // Reset node stats visually
