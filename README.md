@@ -66,10 +66,13 @@ gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128 --out gnn/
 # 1. 對 OK超商 (688 個點) 進行 GPU 加速推理
 gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/OK超商.js --weights gnn/mstsp_gnn_weights.json --out gnn/ok_probs.json
 
-# 2. 對 全家超商 (3,449 個點) 進行 GPU 加速推理
+# 2. 對 萊爾富超商 (1,350 個點) 進行 GPU 加速推理
+gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/萊爾富.js --weights gnn/mstsp_gnn_weights.json --out gnn/hilife_probs.json
+
+# 3. 對 全家超商 (3,449 個點) 進行 GPU 加速推理
 gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/全家.js --weights gnn/mstsp_gnn_weights.json --out gnn/family_probs.json
 
-# 3. 對 7-11超商 (6,080 個點) 進行 GPU 加速推理
+# 4. 對 7-11超商 (6,080 個點) 進行 GPU 加速推理
 gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/7-11超商.js --weights gnn/mstsp_gnn_weights.json --out gnn/seven_probs.json
 ```
 
@@ -86,8 +89,17 @@ gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/7-11超商.js --weig
 這會先用 GPU 計算 GNN 邊機率，然後用該機率來引導 Python 高性能 HGA 引擎（支援多島嶼並行演化與 Cleared  niching 機制）。運行完畢後會輸出**標準的網頁狀態 JSON 檔**，可直接匯入網頁端渲染出動態路線！
 
 ```shell
-# 1. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 HGA 狀態檔
+# 1. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 OK超商 (688 個點) 的 HGA 狀態檔
 gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/OK超商.js --weights gnn/mstsp_gnn_weights.json --hga --generations 500 --pop_size 100 --islands 4 --out gnn/ok_hga_state.json
+
+# 2. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 萊爾富超商 (1,350 個點) 的 HGA 狀態檔
+gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/萊爾富.js --weights gnn/mstsp_gnn_weights.json --hga --generations 500 --pop_size 100 --islands 4 --out gnn/hilife_hga_state.json
+
+# 3. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 全家超商 (3,449 個點) 的 HGA 狀態檔
+gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/全家.js --weights gnn/mstsp_gnn_weights.json --hga --generations 500 --pop_size 100 --islands 4 --out gnn/family_hga_state.json
+
+# 4. 運行 GNN + HGA 優化算法，計算 500 代，並輸出 7-11超商 (6,080 個點) 的 HGA 狀態檔
+gnn/myenv/bin/python gnn/gnn_cli.py --cities_file src/tests/7-11超商.js --weights gnn/mstsp_gnn_weights.json --hga --generations 500 --pop_size 100 --islands 4 --out gnn/seven_hga_state.json
 ```
 
 **參數說明：**
