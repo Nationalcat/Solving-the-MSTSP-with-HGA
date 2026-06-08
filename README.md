@@ -39,11 +39,11 @@ gnn/myenv/bin/pip install -r gnn/requirements.txt
 您可以隨時使用自定義的參數（如隱藏層維度、訓練世代、合成圖大小等）來訓練一個全新的 GNN 模型，並輸出可直接匯入網頁端的 JSON 權重檔案：
 
 ```shell
-# 1. 訓練 128 維 GNN 模型並導出 JSON 權重（預設）
-gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128 --out gnn/mstsp_gnn_weights.json
+# 1. 訓練 128 維 GNN 模型（未指定 --out 時，系統將自動以參數命名，預設為 mstsp_gnn_weights_d128_e40_n150.json）
+gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128
 
-# 2. 訓練模型的同時，也導出標準的 standalone ONNX 模型 (.onnx)
-gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128 --out gnn/mstsp_gnn_weights.json --export_onnx
+# 2. 手動指定特定的 JSON 權重檔名
+gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128 --out gnn/mstsp_gnn_weights.json
 ```
 
 **參數說明：**
@@ -52,8 +52,7 @@ gnn/myenv/bin/python gnn/gnn_cli.py --train --epochs 40 --d_model 128 --out gnn/
 *   `--epochs`：訓練世代（預設：40）。
 *   `--train_samples`：用於訓練的合成圖數量（預設：300）。
 *   `--nodes`：合成圖中的城市點數（預設：150）。
-*   `--out`：導出的 JSON 權重檔案名稱（預設：`mstsp_gnn_weights.json`）。
-*   `--export_onnx`：是否同步導出已嵌入參數的靜態 ONNX 模型。
+*   `--out`：導出的 JSON 權重檔案名稱（若未指定，預設會依據參數自動命名為 `mstsp_gnn_weights_d{d_model}_e{epochs}_n{nodes}.json`）。
 
 ---
 

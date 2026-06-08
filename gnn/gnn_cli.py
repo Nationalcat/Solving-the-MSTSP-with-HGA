@@ -516,7 +516,6 @@ def main():
     
     # Output file
     parser.add_argument('--out', type=str, help='Output filepath (defaults: mstsp_gnn_weights.json, mstsp_gnn_probs.json, or mstsp_hga_state.json)')
-    parser.add_argument('--export_onnx', action='store_true', help='Also export a standard self-contained ONNX model')
     
     # HGA Optimization Parameters
     parser.add_argument('--hga', action='store_true', help='Run GNN-guided Hybrid Genetic Algorithm (HGA)')
@@ -530,7 +529,7 @@ def main():
     # Determine default outputs
     if not args.out:
         if args.train:
-            args.out = 'mstsp_gnn_weights.json'
+            args.out = f'mstsp_gnn_weights_d{args.d_model}_e{args.epochs}_n{args.nodes}.json'
         elif args.hga:
             args.out = 'mstsp_hga_state.json'
         else:
@@ -606,28 +605,6 @@ def main():
             json.dump(weights, f, indent=2)
         print("   Weights JSON exported successfully!")
         
-        # Optional: ONNX Export
-        if args.export_onnx:
-            onnx_path = args.out.replace('.json', '.onnx')
-            print(f"5. Exporting standalone ONNX model to: '{onnx_path}'...")
-            try:
-                dummy_coords = torch.rand(1, args.nodes, 2).to(device)
-                dummy_dists = torch.rand(1, args.nodes, args.nodes).to(device)
-                torch.onnx.export(
-                    model,
-                    (dummy_coords, dummy_dists),
-                    onnx_path,
-                    export_params=True,
-                    opset_version=16,
-                    do_constant_folding=True,
-                    input_names=['coords', 'dist_matrix'],
-                    output_names=['edge_probabilities'],
-                    external_data=False
-                )
-                print("   ONNX model exported successfully!")
-            except Exception as e:
-                print(f"   ONNX export failed: {e}")
-                
         print("\n🎉 Model training and exports are fully completed!")
 
     # ==========================================
